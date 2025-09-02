@@ -395,8 +395,9 @@ const anuncio = {
 
 // 3.11 IPTU e CONDOMÍNIO
 const extractTax = (keyword) => {
-    // Regex aprimorada: busca o keyword, seguido opcionalmente por R$ e então o número.
-    const regex = new RegExp(`(?:${keyword})\\s*:?\\s*(?:r\\$|rs)?\\s*([\\d.,]+)`, 'gi');
+    // CORREÇÃO: Regex mais flexível para permitir texto entre o keyword e o valor.
+    // Ex: "iptu (anual): r$ 3.400,00"
+    const regex = new RegExp(`(?:${keyword})(?:[\\s\\w():.-]*?)?(?:r\\$|rs)?\\s*([\\d.,]+)`, 'gi');
     let match;
     const candidatos = [];
     while ((match = regex.exec(textoNormalizado))) {
@@ -405,9 +406,14 @@ const extractTax = (keyword) => {
             // Evita que o valor do imóvel seja confundido com uma taxa
             if (anuncio.valor && taxValue >= anuncio.valor) continue;
             
-            const context = textoNormalizado.substring(match.index, match.index + match[0].length + 15);
+            const context = textoNormalizado.substring(match.index, match.index + match[0].length + 20);
+            
+            // Lógica de conversão para valor mensal
             if (/\b(anual|ano)\b/.test(context)) {
-                // Se for anual, divide por 12 para ter uma base mensal (opcional)
+                taxValue /= 12;
+            } 
+            // NOVA REGRA DE NEGÓCIO: Se IPTU > 1500 e não for explicitamente mensal, assume-se que é anual.
+            else if (keyword === 'iptu' && taxValue > 1500 && !/\b(mensal|mes)\b/.test(context)) {
                 taxValue /= 12;
             }
             candidatos.push(Math.round(taxValue));
@@ -418,6 +424,7 @@ const extractTax = (keyword) => {
 };
 anuncio.iptu = extractTax('iptu');
 anuncio.condominio = extractTax('condominio|cond\\.?|cota');
+
 
 // --- 4. RETORNO DOS DADOS ---
 // Retorna o objeto final no formato que o n8n espera para os próximos nós.
