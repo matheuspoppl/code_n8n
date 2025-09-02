@@ -13,7 +13,6 @@ const normalizeText = (str) => {
     .replace(/[\u0300-\u036f]/g, '') // remove accents
     .replace(/[*:🚨_~]/g, '') // remove markdown and emojis
     .replace(/\s+/g, ' ')
-    .replaceAll('**','')
     .trim();
 };
 const parseNumber = (str) => {
