@@ -13,6 +13,7 @@ const normalizeText = (str) => {
     .replace(/[\u0300-\u036f]/g, '') // remove accents
     .replace(/[*:🚨_~]/g, '') // remove markdown and emojis
     .replace(/\s+/g, ' ')
+    .replaceAll('**','')
     .trim();
 };
 const parseNumber = (str) => {
@@ -67,30 +68,35 @@ const anuncio = {
     anuncio.intencao = 'oferta';
 })();
 
-// 3.3 VALOR PRINCIPAL (Lógica robusta restaurada)
+// 3.3 VALOR PRINCIPAL e 3.4 TIPO DE OPERAÇÃO (Lógica Unificada e Corrigida)
 (() => {
-    const textoProcessado = textoNormalizado
-        .replace(/(\d[\d.,]*)\s*m[2²]?\b/gi, ' ')
-        .replace(/(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?9\d{4}[-.\s]?\d{4}/g, ' ');
-
+    // Etapa A: Coleta de todos os candidatos a valor
     const candidatos = [];
     let match;
 
-    // Estratégia 1: Valores com sufixos explícitos (k, mil, milhão, etc.)
-    const regexSufixo = /\b([\d.,]+)\s*(mm|milhoes|milhao|kk|k|mil)\b/gi;
-    while ((match = regexSufixo.exec(textoProcessado))) {
-        const context = textoProcessado.substring(Math.max(0, match.index - 20), match.index);
+    // Estratégia 1: Sufixos (mil, milhão, etc.)
+    const regexSufixo = /(?:r\$|rs|\$|valor|preco|preço|investimento|venda|ate|até)?\s*:?\s*\*?\s*([\d.,]+)\s*(mm|milhoes|milhao|kk|k|mil)\b/gi;
+    while ((match = regexSufixo.exec(textoNormalizado))) {
+        const context = textoNormalizado.substring(Math.max(0, match.index - 20), match.index);
         if (/\b(iptu|condominio|cond)\b/.test(context)) continue;
-        let numeroBase = parseFloat(match[1].replace(',', '.')); // "1.193k" -> 1.193
+        
+        let numeroBase;
+        const sufixo = match[2].toLowerCase().replace('ões', 'oes').replace('ão', 'ao');
+
+        if (['m', 'mm', 'milhoes', 'milhao', 'kk'].includes(sufixo)) {
+            numeroBase = parseFloat(match[1].replace(',', '.'));
+        } else {
+            numeroBase = parseNumber(match[1]);
+        }
+        
         if (!isNaN(numeroBase)) {
-            const sufixo = match[2].toLowerCase();
             if (['k', 'mil'].includes(sufixo)) candidatos.push(numeroBase * 1000);
             else if (['m', 'mm', 'milhoes', 'milhao', 'kk'].includes(sufixo)) candidatos.push(numeroBase * 1000000);
         }
     }
 
-    // Estratégia 2: Valores com palavras-chave (Valor, R$, etc.)
-    const regexKeyword = /(?:valor|preco|preço|investimento|venda|ate|até|r\$|rs|\$)\s*:?\s*([\d.,]+)/gi;
+    // Estratégia 2: Keywords sem sufixo
+    const regexKeyword = /(?:valor|preco|preço|investimento|venda|ate|até|r\$|rs|\$)\s*:?\s*\*?\s*([\d.,]+)/gi;
     while ((match = regexKeyword.exec(textoNormalizado))) {
         const context = textoNormalizado.substring(Math.max(0, match.index - 20), match.index);
         if (/\b(iptu|condominio|cond)\b/.test(context)) continue;
@@ -99,36 +105,54 @@ const anuncio = {
         const valor = parseNumber(match[1]);
         if (valor) candidatos.push(valor);
     }
-
+    
     // Estratégia 3: Números grandes bem formatados, sem keywords
-    const regexGrandes = /\b(\d{1,3}(\.\d{3})+,\d{2}|\d{1,3}(\.\d{3}){2,})\b/g;
+    const regexGrandes = /(?<!\d[.,])(\d{1,3}(\.\d{3})+,\d{2}|\d{1,3}(\.\d{3}){2,})(?![.,]\d)/g;
     while ((match = regexGrandes.exec(textoNormalizado))) {
         const context = textoNormalizado.substring(Math.max(0, match.index - 30), match.index);
         if (/\b(valor|preco|preço|investimento|venda|ate|até|r\$|rs|\$|iptu|condominio|cond)\b/.test(context)) continue;
         const valor = parseNumber(match[0]);
         if (valor) candidatos.push(valor);
     }
-
-    const validos = [...new Set(candidatos)].filter(v => v > 1000 && v < 200000000);
-    if (validos.length > 0) {
-        anuncio.valor = Math.max(...validos);
-    }
-})();
-
-
-// 3.4 TIPO DE OPERAÇÃO (Lógica aprimorada)
-(() => {
-    const kwAluguel = /\b(aluguel|aluga-se|locacao|alugo|locar|temporada)\b/;
-    if (kwAluguel.test(textoNormalizado)) { anuncio.tipo_operacao = 'aluguel'; return; }
     
-    const kwVenda = /\b(venda|vendo|vende-se|a venda|compra|comprar|investidor)\b/;
-    if (kwVenda.test(textoNormalizado)) { anuncio.tipo_operacao = 'venda'; return; }
+    const uniqueCandidatos = [...new Set(candidatos)];
 
-    if (anuncio.valor) {
-        if (anuncio.valor >= 80000) anuncio.tipo_operacao = 'venda';
-        else anuncio.tipo_operacao = 'aluguel';
+    // Etapa B: Determinar tipo de operação
+    const kwAluguel = /\b(aluguel|aluga-se|locacao|alugo|locar|temporada)\b/;
+    const kwVenda = /\b(venda|vendo|vende-se|a venda|compra|comprar|investidor)\b/;
+
+    if (kwAluguel.test(textoNormalizado)) {
+        anuncio.tipo_operacao = 'aluguel';
+    } else if (kwVenda.test(textoNormalizado)) {
+        anuncio.tipo_operacao = 'venda';
+    } else if (uniqueCandidatos.length > 0) {
+        const maxCandidato = Math.max(...uniqueCandidatos);
+        if (maxCandidato >= 80000) {
+            anuncio.tipo_operacao = 'venda';
+        } else if (maxCandidato > 0) {
+            anuncio.tipo_operacao = 'aluguel';
+        }
+    }
+
+    // Etapa C: Filtrar e selecionar o valor principal
+    if (uniqueCandidatos.length > 0) {
+        let validos;
+        if (anuncio.tipo_operacao === 'aluguel') {
+            validos = uniqueCandidatos.filter(v => v >= 500 && v < 80000);
+        } else { // Venda ou indefinido
+            validos = uniqueCandidatos.filter(v => v >= 80000 && v < 200000000);
+        }
+        
+        if (validos.length === 0 && anuncio.intencao === 'procura') {
+           validos = uniqueCandidatos.filter(v => v > 1000 && v < 200000000);
+        }
+
+        if (validos.length > 0) {
+            anuncio.valor = Math.max(...validos);
+        }
     }
 })();
+
 
 // 3.5 TIPO DE IMÓVEL
 (() => {
