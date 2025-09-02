@@ -1,4 +1,4 @@
-const conteudo = $json.mensagem_conteudo;
+const conteudo = item.mensagem_conteudo;
 
 if (!conteudo || typeof conteudo !== 'string') {
   return { caracteristicas: {} };
@@ -11,7 +11,7 @@ const normalizeText = (str) => {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // remove accents
-    .replace(/[*:🚨_~]/g, '') // remove markdown and emojis
+    .replace(/[*:🚨_~]/g, '') // remove markdown and emojis that break patterns
     .replace(/\s+/g, ' ')
     .trim();
 };
