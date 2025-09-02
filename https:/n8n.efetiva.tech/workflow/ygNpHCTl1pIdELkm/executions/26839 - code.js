@@ -11,7 +11,7 @@ const normalizeText = (str) => {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // remove accents
-    .replace(/[*:🚨]/g, '') // remove markdown and emojis
+    .replace(/[*:🚨_~]/g, '') // remove markdown and emojis
     .replace(/\s+/g, ' ')
     .trim();
 };
@@ -67,32 +67,30 @@ const anuncio = {
     anuncio.intencao = 'oferta';
 })();
 
-// 3.3 VALOR PRINCIPAL e 3.4 TIPO DE OPERAÇÃO (Lógica Unificada e Corrigida)
+// 3.3 VALOR PRINCIPAL (Lógica robusta restaurada)
 (() => {
-    // Etapa A: Coleta de todos os candidatos a valor
+    const textoProcessado = textoNormalizado
+        .replace(/(\d[\d.,]*)\s*m[2²]?\b/gi, ' ')
+        .replace(/(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?9\d{4}[-.\s]?\d{4}/g, ' ');
+
     const candidatos = [];
     let match;
 
-    // Estratégia 1: Keywords com sufixo (ex: "valor 700 mil")
-    const regexKeywordSufixo = /(?:valor|preco|preço|investimento|venda|ate|até|r\$|rs|\$)\s*:?\s*\*?\s*([\d.,]+)\s*(mm|milhoes|milhao|kk|k|mil)\b/gi;
-    while ((match = regexKeywordSufixo.exec(textoNormalizado))) {
-        const context = textoNormalizado.substring(Math.max(0, match.index - 20), match.index);
+    // Estratégia 1: Valores com sufixos explícitos (k, mil, milhão, etc.)
+    const regexSufixo = /\b([\d.,]+)\s*(mm|milhoes|milhao|kk|k|mil)\b/gi;
+    while ((match = regexSufixo.exec(textoProcessado))) {
+        const context = textoProcessado.substring(Math.max(0, match.index - 20), match.index);
         if (/\b(iptu|condominio|cond)\b/.test(context)) continue;
-        let numeroBase;
-        const sufixo = match[2].toLowerCase().replace('ões', 'oes').replace('ão', 'ao');
-        if (['m', 'mm', 'milhoes', 'milhao', 'kk'].includes(sufixo)) {
-            numeroBase = parseFloat(match[1].replace(',', '.'));
-        } else {
-            numeroBase = parseNumber(match[1]);
-        }
+        let numeroBase = parseFloat(match[1].replace(',', '.')); // "1.193k" -> 1.193
         if (!isNaN(numeroBase)) {
+            const sufixo = match[2].toLowerCase();
             if (['k', 'mil'].includes(sufixo)) candidatos.push(numeroBase * 1000);
             else if (['m', 'mm', 'milhoes', 'milhao', 'kk'].includes(sufixo)) candidatos.push(numeroBase * 1000000);
         }
     }
 
-    // Estratégia 2: Keywords sem sufixo (ex: "valor 650.000,00")
-    const regexKeyword = /(?:valor|preco|preço|investimento|venda|ate|até|r\$|rs|\$)\s*:?\s*\*?\s*([\d.,]+)/gi;
+    // Estratégia 2: Valores com palavras-chave (Valor, R$, etc.)
+    const regexKeyword = /(?:valor|preco|preço|investimento|venda|ate|até|r\$|rs|\$)\s*:?\s*([\d.,]+)/gi;
     while ((match = regexKeyword.exec(textoNormalizado))) {
         const context = textoNormalizado.substring(Math.max(0, match.index - 20), match.index);
         if (/\b(iptu|condominio|cond)\b/.test(context)) continue;
@@ -102,20 +100,7 @@ const anuncio = {
         if (valor) candidatos.push(valor);
     }
 
-    // Estratégia 3: Sufixos sem keyword (ex: "1.193k")
-    const regexSufixo = /\b([\d.,]+)\s*(mm|milhoes|milhao|kk|k|mil)\b/gi;
-    while ((match = regexSufixo.exec(textoNormalizado))) {
-        const context = textoNormalizado.substring(Math.max(0, match.index - 30), match.index);
-        if (/\b(valor|preco|preço|investimento|venda|ate|até|r\$|rs|\$|iptu|condominio|cond)\b/.test(context)) continue;
-        let numeroBase = parseNumber(match[1]);
-        if (numeroBase) {
-            const sufixo = match[2].toLowerCase().replace('ões', 'oes').replace('ão', 'ao');
-            if (['k', 'mil'].includes(sufixo)) candidatos.push(numeroBase * 1000);
-            else if (['m', 'mm', 'milhoes', 'milhao', 'kk'].includes(sufixo)) candidatos.push(numeroBase * 1000000);
-        }
-    }
-    
-    // Estratégia 4: Números grandes bem formatados, sem keywords (ex: "1.500.000")
+    // Estratégia 3: Números grandes bem formatados, sem keywords
     const regexGrandes = /\b(\d{1,3}(\.\d{3})+,\d{2}|\d{1,3}(\.\d{3}){2,})\b/g;
     while ((match = regexGrandes.exec(textoNormalizado))) {
         const context = textoNormalizado.substring(Math.max(0, match.index - 30), match.index);
@@ -123,45 +108,27 @@ const anuncio = {
         const valor = parseNumber(match[0]);
         if (valor) candidatos.push(valor);
     }
-    
-    const uniqueCandidatos = [...new Set(candidatos)];
 
-    // Etapa B: Determinar tipo de operação
-    const kwAluguel = /\b(aluguel|aluga-se|locacao|alugo|locar|temporada)\b/;
-    const kwVenda = /\b(venda|vendo|vende-se|a venda|compra|comprar|investidor)\b/;
-
-    if (kwAluguel.test(textoNormalizado)) {
-        anuncio.tipo_operacao = 'aluguel';
-    } else if (kwVenda.test(textoNormalizado)) {
-        anuncio.tipo_operacao = 'venda';
-    } else if (uniqueCandidatos.length > 0) {
-        const maxCandidato = Math.max(...uniqueCandidatos);
-        if (maxCandidato >= 80000) {
-            anuncio.tipo_operacao = 'venda';
-        } else if (maxCandidato > 0) {
-            anuncio.tipo_operacao = 'aluguel';
-        }
-    }
-
-    // Etapa C: Filtrar e selecionar o valor principal
-    if (uniqueCandidatos.length > 0) {
-        let validos;
-        if (anuncio.tipo_operacao === 'aluguel') {
-            validos = uniqueCandidatos.filter(v => v >= 500 && v < 80000);
-        } else { // Venda ou indefinido
-            validos = uniqueCandidatos.filter(v => v >= 80000 && v < 200000000);
-        }
-        
-        if (validos.length === 0 && anuncio.intencao === 'procura') {
-           validos = uniqueCandidatos.filter(v => v > 1000 && v < 200000000);
-        }
-
-        if (validos.length > 0) {
-            anuncio.valor = Math.max(...validos);
-        }
+    const validos = [...new Set(candidatos)].filter(v => v > 1000 && v < 200000000);
+    if (validos.length > 0) {
+        anuncio.valor = Math.max(...validos);
     }
 })();
 
+
+// 3.4 TIPO DE OPERAÇÃO (Lógica aprimorada)
+(() => {
+    const kwAluguel = /\b(aluguel|aluga-se|locacao|alugo|locar|temporada)\b/;
+    if (kwAluguel.test(textoNormalizado)) { anuncio.tipo_operacao = 'aluguel'; return; }
+    
+    const kwVenda = /\b(venda|vendo|vende-se|a venda|compra|comprar|investidor)\b/;
+    if (kwVenda.test(textoNormalizado)) { anuncio.tipo_operacao = 'venda'; return; }
+
+    if (anuncio.valor) {
+        if (anuncio.valor >= 80000) anuncio.tipo_operacao = 'venda';
+        else anuncio.tipo_operacao = 'aluguel';
+    }
+})();
 
 // 3.5 TIPO DE IMÓVEL
 (() => {
