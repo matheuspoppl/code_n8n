@@ -1,35 +1,72 @@
-const conteudo = item.mensagem_conteudo;
-
-if (!conteudo || typeof conteudo !== 'string') {
+// Verifica se o campo de entrada existe e é uma string.
+// Se não for, retorna um objeto vazio para evitar erros no fluxo do n8n.
+if (!$json.mensagem_conteudo || typeof $json.mensagem_conteudo !== 'string') {
   return { caracteristicas: {} };
 }
 
+const conteudo = $json.mensagem_conteudo;
+
 // --- 1. FUNÇÕES DE AJUDA REUTILIZÁVEIS ---
+
+/**
+ * Normaliza e limpa o texto para facilitar a extração com regex.
+ * - Converte para minúsculas.
+ * - Remove acentos.
+ * - Remove caracteres de formatação do WhatsApp (negrito, itálico, etc.) e emojis comuns.
+ * - Consolida múltiplos espaços em um só.
+ * @param {string} str O texto original do anúncio.
+ * @returns {string} O texto limpo e normalizado.
+ */
 const normalizeText = (str) => {
   if (!str) return '';
   return str
+    // CORREÇÃO DEFINITIVA: Remove TODOS os asteriscos (*) do texto antes de qualquer outra etapa.
+    // Isso garante que a formatação de negrito não interfira em nenhuma das regex subsequentes.
+    .replace(/\*/g, '')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // remove accents
-    .replace(/[*:🚨_~]/g, '') // remove markdown and emojis that break patterns
-    .replace(/\s+/g, ' ')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .replace(/[:🚨_~]/g, '')     // Remove os demais caracteres de markdown
+    .replace(/\s+/g, ' ')           // Junta múltiplos espaços
     .trim();
 };
+
+/**
+ * Converte uma string monetária (ex: "1.500,00") em um número de ponto flutuante.
+ * @param {string} str A string a ser convertida.
+ * @returns {number|null} O número convertido ou null se for inválido.
+ */
 const parseNumber = (str) => {
   if (typeof str !== 'string') return null;
+  // Remove pontos de milhar e substitui a vírgula decimal por ponto
   const cleanStr = str.replace(/\./g, '').replace(',', '.');
   const value = parseFloat(cleanStr);
   return isNaN(value) ? null : value;
 };
+
+// Mapeamento para converter números escritos por extenso em dígitos.
 const wordsToNumMap = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10 };
 
 // --- 2. INICIALIZAÇÃO ---
+
+// Normaliza o texto de entrada uma única vez para otimizar o desempenho
 const textoNormalizado = normalizeText(conteudo);
+
+// Estrutura de dados final que será preenchida com as informações extraídas
 const anuncio = {
-  nome_anunciante: null, telefone_anunciante: null, intencao: null,
-  tipo_operacao: null, tipo_imovel: null, quartos: null,
-  suites: null, banheiros: null, vagas_garagem: null,
-  area_m2: null, valor: null, iptu: null, condominio: null,
+  nome_anunciante: null,
+  telefone_anunciante: null,
+  intencao: null,
+  tipo_operacao: null,
+  tipo_imovel: null,
+  quartos: null,
+  suites: null,
+  banheiros: null,
+  vagas_garagem: null,
+  area_m2: null,
+  valor: null,
+  iptu: null,
+  condominio: null,
 };
 
 // --- 3. LÓGICA DE EXTRAÇÃO DETALHADA ---
@@ -58,65 +95,79 @@ const anuncio = {
 (() => {
     const procuraRegex = /\b(procuro|procura|preciso|busco|buscando|cliente (busca|procura)|alguem com|necessito|gostaria de)\b/;
     if (procuraRegex.test(textoNormalizado)) { anuncio.intencao = 'procura'; return; }
+    
     const ofertaExplicitaRegex = /\b(vendo|alugo|venda|locacao|oportunidade|vende-se|aluga-se|porteira fechada|disponivel para)\b/;
     if (ofertaExplicitaRegex.test(textoNormalizado)) { anuncio.intencao = 'oferta'; return; }
+
     const ofertaFeatures = [/r\s*\$/, /\b\d+\s*m(2|²)/, /\b\d+\s*(quarto|qto|suite)/, /\b(cod|codigo|ref|ap)\d+/, /https?:/];
     let featureCount = 0;
     for (const feature of ofertaFeatures) { if (feature.test(textoNormalizado)) featureCount++; }
     if (featureCount >= 2) { anuncio.intencao = 'oferta'; return; }
+    
+    // Assume como oferta por padrão se não for claramente uma procura
     anuncio.intencao = 'oferta';
 })();
 
 // 3.3 VALOR PRINCIPAL e 3.4 TIPO DE OPERAÇÃO (Lógica Unificada e Corrigida)
 (() => {
-    // Etapa A: Coleta de todos os candidatos a valor
     const candidatos = [];
     let match;
 
-    // Estratégia 1: Sufixos (mil, milhão, etc.)
-    const regexSufixo = /(?:r\$|rs|\$|valor|preco|preço|investimento|venda|ate|até)?\s*:?\s*\*?\s*([\d.,]+)\s*(mm|milhoes|milhao|kk|k|mil)\b/gi;
-    while ((match = regexSufixo.exec(textoNormalizado))) {
-        const context = textoNormalizado.substring(Math.max(0, match.index - 20), match.index);
-        if (/\b(iptu|condominio|cond)\b/.test(context)) continue;
-        
-        let numeroBase;
-        const sufixo = match[2].toLowerCase().replace('ões', 'oes').replace('ão', 'ao');
+    // Etapa de Limpeza Adicional
+    const textoParaValor = textoNormalizado.replace(/(\d[\d.,]*)\s*m[2²]?\b/gi, ' ').replace(/(\d[\d.,]*)\s*metros\b/gi, ' ');
 
+    const mainKeywords = 'valor|preco|preço|investimento|venda|ate|até';
+    const currencySymbols = 'r\\$|rs|\\$';
+
+    // Estratégia 1: Valores com sufixos (k, mil, m, milhão)
+    const regexSufixo = /([\d.,]+)\s*(mm|m|milh[oõ]es|milh[aã]o|kk|k|mil)\b/gi;
+    while ((match = regexSufixo.exec(textoParaValor))) {
+        const valorStr = match[1];
+        const sufixo = match[2].toLowerCase().replace('ões', 'oes').replace('ão', 'ao');
+        let numeroBase;
+
+        // *** CORREÇÃO CRÍTICA PARA CASOS COMO "2.500MM" ***
         if (['m', 'mm', 'milhoes', 'milhao', 'kk'].includes(sufixo)) {
-            numeroBase = parseFloat(match[1].replace(',', '.'));
+            // Se o sufixo indica milhões, o ponto é um separador decimal. Ex: "2.500" -> 2.5
+            numeroBase = parseFloat(valorStr.replace(',', '.'));
         } else {
-            numeroBase = parseNumber(match[1]);
+            // Para 'k' e 'mil', o ponto é um separador de milhar. Ex: "500.000" -> 500000
+            numeroBase = parseNumber(valorStr);
         }
-        
+
         if (!isNaN(numeroBase)) {
-            if (['k', 'mil'].includes(sufixo)) candidatos.push(numeroBase * 1000);
-            else if (['m', 'mm', 'milhoes', 'milhao', 'kk'].includes(sufixo)) candidatos.push(numeroBase * 1000000);
+            let valorFinal = null;
+            if (['k', 'mil'].includes(sufixo)) valorFinal = numeroBase * 1000;
+            else if (['m', 'mm', 'milhoes', 'milhao', 'kk'].includes(sufixo)) valorFinal = numeroBase * 1000000;
+            if (valorFinal) candidatos.push(valorFinal);
         }
     }
 
-    // Estratégia 2: Keywords sem sufixo
-    const regexKeyword = /(?:valor|preco|preço|investimento|venda|ate|até|r\$|rs|\$)\s*:?\s*\*?\s*([\d.,]+)/gi;
+    // Estratégia 2: Valores precedidos por palavras-chave ou símbolos.
+    const regexKeyword = new RegExp(`(?:${mainKeywords}|${currencySymbols})\\s*:?\\s*([\\d.,]+)`, 'gi');
     while ((match = regexKeyword.exec(textoNormalizado))) {
         const context = textoNormalizado.substring(Math.max(0, match.index - 20), match.index);
         if (/\b(iptu|condominio|cond)\b/.test(context)) continue;
+
         const nextChars = textoNormalizado.substring(match.index + match[0].length, match.index + match[0].length + 8).trim();
         if (['k', 'mil', 'm', 'mm', 'milhao', 'milhoes'].some(suf => nextChars.startsWith(suf))) continue;
+
         const valor = parseNumber(match[1]);
         if (valor) candidatos.push(valor);
     }
     
-    // Estratégia 3: Números grandes bem formatados, sem keywords
-    const regexGrandes = /(?<!\d[.,])(\d{1,3}(\.\d{3})+,\d{2}|\d{1,3}(\.\d{3}){2,})(?![.,]\d)/g;
-    while ((match = regexGrandes.exec(textoNormalizado))) {
+    // Estratégia 3: Números grandes e bem formatados, sem palavras-chave.
+    const regexNumerosGrandes = /\b(\d{1,3}(\.\d{3})+,\d{2})\b|\b(\d{1,3}(\.\d{3}){2,})\b/g;
+    while ((match = regexNumerosGrandes.exec(textoNormalizado))) {
         const context = textoNormalizado.substring(Math.max(0, match.index - 30), match.index);
-        if (/\b(valor|preco|preço|investimento|venda|ate|até|r\$|rs|\$|iptu|condominio|cond)\b/.test(context)) continue;
-        const valor = parseNumber(match[0]);
+        if (new RegExp(`\\b(${mainKeywords}|${currencySymbols.replace(/\\/g, '')}|iptu|condominio|cond)\\b`).test(context)) continue;
+        const valor = parseNumber(match[1] || match[3]);
         if (valor) candidatos.push(valor);
     }
     
     const uniqueCandidatos = [...new Set(candidatos)];
 
-    // Etapa B: Determinar tipo de operação
+    // Determina o tipo de operação (venda/aluguel)
     const kwAluguel = /\b(aluguel|aluga-se|locacao|alugo|locar|temporada)\b/;
     const kwVenda = /\b(venda|vendo|vende-se|a venda|compra|comprar|investidor)\b/;
 
@@ -133,7 +184,7 @@ const anuncio = {
         }
     }
 
-    // Etapa C: Filtrar e selecionar o valor principal
+    // Seleciona o valor principal com base no tipo de operação
     if (uniqueCandidatos.length > 0) {
         let validos;
         if (anuncio.tipo_operacao === 'aluguel') {
@@ -163,21 +214,18 @@ const anuncio = {
     else if (/\b\d+\s*(quarto|qto|suite)s?\b/.test(textoNormalizado)) anuncio.tipo_imovel = 'Apartamento';
 })();
 
-// 3.6 SUÍTES (Lógica Robusta Restaurada)
+// 3.6 SUÍTES
 (() => {
     const candidatos = [];
     let match;
     const regexes = [
-        // Prioridade 1: "sendo 3 suítes", "com 2 suítes"
         /\b(?:sendo|com|possui|tem)\s*(\d{1,2}|uma|um|duas|dois|tres|quatro)\s*(?:quartos?\s*)?(suites?|ste?s?)\b/g,
-        // Prioridade 2: "3 suítes" ou "2 quartos suítes"
         /\b(\d{1,2}|uma|um|duas|dois|tres|quatro)\s*(?:quartos?\s*)?(suites?|ste?s?)\b/g,
-        // Prioridade 3: "suítes: 2"
         /\b(suites?|ste?s?)\s*:?\s*(\d{1,2})\b/g,
     ];
 
     for (const re of regexes) {
-        re.lastIndex = 0; // Resetar o índice para regex global
+        re.lastIndex = 0;
         while ((match = re.exec(textoNormalizado))) {
             const numStr = match[1] || match[2];
             const num = wordsToNumMap[numStr] || parseInt(numStr, 10);
@@ -192,12 +240,11 @@ const anuncio = {
     }
 })();
 
-// 3.7 QUARTOS (Lógica Robusta Restaurada)
+// 3.7 QUARTOS
 (() => {
     const candidatos = [];
     let match;
     const regexes = [
-        // Regex corrigida para capturar com adjetivos no meio
         /\b(\d{1,2}|uma|um|duas|dois|tres|quatro)\s*(?:espacosos?|amplos?)?\s*(quartos?|qts?|qtos?|dormitorios?|q)\b/g,
         /\b(quartos?|qts?|qtos?|dormitorios?)\s*:?\s*(\d{1,2})\b/g
     ];
@@ -225,7 +272,7 @@ const anuncio = {
     }
 })();
 
-// 3.8 BANHEIROS (Lógica Robusta Final Aprimorada)
+// 3.8 BANHEIROS
 (() => {
     if (/\b(sem|s\/)\s*banheiro/.test(textoNormalizado)) {
         anuncio.banheiros = 0;
@@ -241,17 +288,10 @@ const anuncio = {
         }
     }
 
-    const counts = {
-        suite: anuncio.suites || 0,
-        lavabo: 0,
-        social: 0,
-        servico: 0,
-        generic: 0,
-    };
+    const counts = { suite: anuncio.suites || 0, lavabo: 0, social: 0, servico: 0, generic: 0 };
     
     const extractMaxCount = (regex) => {
-        let maxCount = 0;
-        let match;
+        let maxCount = 0, match;
         regex.lastIndex = 0;
         while ((match = regex.exec(textoNormalizado))) {
             const numStr = match[1] || match[2] || match[3];
@@ -276,26 +316,20 @@ const anuncio = {
     const isResidential = anuncio.tipo_imovel && ['Apartamento', 'Casa', 'Cobertura'].includes(anuncio.tipo_imovel);
     
     const onlySuitesFound = counts.suite > 0 && (counts.lavabo + counts.social + counts.servico + counts.generic) === 0;
-    if (isResidential && onlySuitesFound) {
-       finalCount = counts.suite + 1;
-    }
+    if (isResidential && onlySuitesFound) finalCount = counts.suite + 1;
 
     const isResidentialMultiBedroom = isResidential && anuncio.quartos && anuncio.quartos > 1;
     if(isResidentialMultiBedroom && finalCount === 1 && counts.servico === 1 && counts.suite === 0 && counts.social === 0 && counts.lavabo === 0) {
-        finalCount = 2; // Adiciona o banheiro social implícito
+        finalCount = 2;
     }
     
     const needsBathroom = anuncio.tipo_imovel && ['Apartamento', 'Casa', 'Cobertura', 'Imóvel Comercial'].includes(anuncio.tipo_imovel);
-    if (finalCount === 0 && needsBathroom) {
-        finalCount = 1;
-    }
+    if (finalCount === 0 && needsBathroom) finalCount = 1;
 
-    if (finalCount > 0) {
-        anuncio.banheiros = finalCount;
-    }
+    if (finalCount > 0) anuncio.banheiros = finalCount;
 })();
 
-// 3.9 VAGAS DE GARAGEM (Lógica Robusta Restaurada)
+// 3.9 VAGAS DE GARAGEM
 (() => {
     if (/\b(sem|nenhuma|nao possui|nao tem)\s+(vaga|garagem)\b/.test(textoNormalizado)) {
         anuncio.vagas_garagem = 0;
@@ -361,22 +395,31 @@ const anuncio = {
 
 // 3.11 IPTU e CONDOMÍNIO
 const extractTax = (keyword) => {
-    const regex = new RegExp(`(?:${keyword})(?:[\\s\\w:.-]*)?(?:r\\$|rs)?\\s*([\\d.,]+)`, 'gi');
+    // Regex aprimorada: busca o keyword, seguido opcionalmente por R$ e então o número.
+    const regex = new RegExp(`(?:${keyword})\\s*:?\\s*(?:r\\$|rs)?\\s*([\\d.,]+)`, 'gi');
     let match;
     const candidatos = [];
     while ((match = regex.exec(textoNormalizado))) {
         let taxValue = parseNumber(match[1]);
         if (taxValue) {
+            // Evita que o valor do imóvel seja confundido com uma taxa
             if (anuncio.valor && taxValue >= anuncio.valor) continue;
+            
             const context = textoNormalizado.substring(match.index, match.index + match[0].length + 15);
-            if (/\b(anual|ano)\b/.test(context)) taxValue /= 12;
+            if (/\b(anual|ano)\b/.test(context)) {
+                // Se for anual, divide por 12 para ter uma base mensal (opcional)
+                taxValue /= 12;
+            }
             candidatos.push(Math.round(taxValue));
         }
     }
+    // Retorna o menor valor encontrado, que é mais provável ser a taxa mensal
     return candidatos.length > 0 ? Math.min(...candidatos) : null;
 };
 anuncio.iptu = extractTax('iptu');
 anuncio.condominio = extractTax('condominio|cond\\.?|cota');
 
 // --- 4. RETORNO DOS DADOS ---
+// Retorna o objeto final no formato que o n8n espera para os próximos nós.
 return { caracteristicas: anuncio };
+
