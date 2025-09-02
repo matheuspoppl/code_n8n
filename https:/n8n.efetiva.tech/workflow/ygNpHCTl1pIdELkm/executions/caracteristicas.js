@@ -1,10 +1,10 @@
 // Verifica se o campo de entrada existe e é uma string.
 // Se não for, retorna um objeto vazio para evitar erros no fluxo do n8n.
-if (!$json.mensagem_conteudo || typeof $json.mensagem_conteudo !== 'string') {
+if (!$json.caractbd.mensagem || typeof $json.caractbd.mensagem !== 'string') {
   return { caracteristicas: {} };
 }
 
-const conteudo = $json.mensagem_conteudo;
+const conteudo = $json.caractbd.mensagem;
 
 // --- 1. FUNÇÕES DE AJUDA REUTILIZÁVEIS ---
 
@@ -393,40 +393,62 @@ const anuncio = {
     }
 })();
 
-// 3.11 IPTU e CONDOMÍNIO
-const extractTax = (keyword) => {
-    // CORREÇÃO: Regex mais flexível para permitir texto entre o keyword e o valor.
-    // Ex: "iptu (anual): r$ 3.400,00"
-    const regex = new RegExp(`(?:${keyword})(?:[\\s\\w():.-]*?)?(?:r\\$|rs)?\\s*([\\d.,]+)`, 'gi');
-    let match;
-    const candidatos = [];
-    while ((match = regex.exec(textoNormalizado))) {
-        let taxValue = parseNumber(match[1]);
-        if (taxValue) {
-            // Evita que o valor do imóvel seja confundido com uma taxa
-            if (anuncio.valor && taxValue >= anuncio.valor) continue;
-            
-            const context = textoNormalizado.substring(match.index, match.index + match[0].length + 20);
-            
-            // Lógica de conversão para valor mensal
+// 3.11 IPTU e CONDOMÍNIO (LÓGICA REFINADA)
+(() => {
+    const extractTax = (keyword, isIptu = false) => {
+        // Regex aprimorada que captura o texto entre a palavra-chave e o valor
+        const regex = new RegExp(`(?:${keyword})([\\s\\w():.-]*?)(?:r\\$|rs)?\\s*([\\d.,]+)`, 'gi');
+        let match;
+        const candidatos = [];
+
+        while ((match = regex.exec(textoNormalizado))) {
+            const snippetBetween = (match[1] || '').trim();
+            const valorStr = match[2];
+            const fullMatchText = match[0];
+            const valorNumerico = parseNumber(valorStr);
+
+            if (!valorNumerico) continue;
+
+            // --- Análise de Contexto para evitar falsos positivos ---
+            const palavrasDeDescarte = /\b(com|quartos?|vagas?|unidades?|andares?|lazer|infra|seguranca|piscina|portaria)\b/;
+            const ehTaxaExplicita = /\b(valor|taxa|cota)\b/.test(snippetBetween) || snippetBetween.startsWith(':');
+            if (palavrasDeDescarte.test(snippetBetween) && !ehTaxaExplicita) {
+                continue;
+            }
+
+            const hasMonetarySymbol = /r\$|rs/.test(fullMatchText);
+            const hasFormatting = /[.,]/.test(valorStr);
+            if (valorNumerico <= 100 && !hasMonetarySymbol && !hasFormatting && !ehTaxaExplicita) {
+                continue; // Evita capturar "condominio rio 2"
+            }
+
+            if (anuncio.valor && valorNumerico >= anuncio.valor) continue;
+
+            let taxValue = valorNumerico;
+            const context = fullMatchText + textoNormalizado.substring(match.index + match[0].length, match.index + match[0].length + 15);
+
             if (/\b(anual|ano)\b/.test(context)) {
                 taxValue /= 12;
-            } 
-            // NOVA REGRA DE NEGÓCIO: Se IPTU > 1500 e não for explicitamente mensal, assume-se que é anual.
-            else if (keyword === 'iptu' && taxValue > 1500 && !/\b(mensal|mes)\b/.test(context)) {
+            } else if (isIptu && taxValue > 1500 && !/\b(mensal|mes)\b/.test(context)) {
                 taxValue /= 12;
             }
             candidatos.push(Math.round(taxValue));
         }
+        return candidatos.length > 0 ? candidatos[candidatos.length - 1] : null;
+    };
+
+    anuncio.iptu = extractTax('iptu', true);
+    anuncio.condominio = extractTax('condominio|cond\\.?|cota');
+
+    // 3.12 VALIDAÇÃO CRUZADA DE TAXAS
+    if (anuncio.condominio && anuncio.iptu && anuncio.condominio <= anuncio.iptu) {
+        // Se o condomínio for menor ou igual ao IPTU (mensal), é um forte indicativo de erro.
+        // Invalida o valor do condomínio, pois é mais provável que tenha sido confundido.
+        anuncio.condominio = null;
     }
-    // Retorna o menor valor encontrado, que é mais provável ser a taxa mensal
-    return candidatos.length > 0 ? Math.min(...candidatos) : null;
-};
-anuncio.iptu = extractTax('iptu');
-anuncio.condominio = extractTax('condominio|cond\\.?|cota');
+})();
 
 
 // --- 4. RETORNO DOS DADOS ---
 // Retorna o objeto final no formato que o n8n espera para os próximos nós.
 return { caracteristicas: anuncio };
-
