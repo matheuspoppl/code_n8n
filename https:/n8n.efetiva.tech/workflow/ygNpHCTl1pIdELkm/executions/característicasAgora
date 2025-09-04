@@ -543,17 +543,37 @@ if (!anuncio.tipo_imovel && anuncio.area_m2 && anuncio.area_m2 > 2000) {
 
     const textoCru = conteudo.replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ').replace(/[*_~]/g, '');
 
-    // Primeiro, vamos recalcular os valores de forma robusta para a comparação
-    let iptuRobusto = null;
+    // --- LÓGICA DE CORREÇÃO PARA CONDOMÍNIO ---
     let condRobusto = null;
+    const condRegexes = [
+        /(?:condominio|cond)[\s\w():.-]*?(?:r\$|rs)?\s*([\d.,]+)/i, // Padrão normal
+        /([\d.,]+)\s*mil\s*de\s*condominio/i // Padrão "7 mil de condomínio"
+    ];
 
+    for (const regex of condRegexes) {
+        let match = textoCru.match(regex);
+        if (match) {
+            condRobusto = parseTaxaRobusta(match[1]);
+            if (match[0].includes('mil')) {
+                condRobusto *= 1000;
+            }
+            // Se encontrou um valor válido, para a busca
+            if (condRobusto) break;
+        }
+    }
+    
+    // Aplica a correção no condomínio se necessário
+    if (condRobusto && anuncio.condominio !== condRobusto) {
+        // Corrige apenas se o original for nulo ou claramente um valor de IPTU/outro
+        if (anuncio.condominio === null || (anuncio.iptu && anuncio.condominio === anuncio.iptu) || (anuncio.valor && anuncio.condominio === anuncio.valor) || (anuncio.condominio < 50 && condRobusto > 50)) {
+             anuncio.condominio = Math.round(condRobusto);
+        }
+    }
+
+    // --- LÓGICA DE CORREÇÃO PARA IPTU ---
+    let iptuRobusto = null;
     let iptuMatch = textoCru.match(/iptu[\s\w():.-]*?(?:r\$|rs)?\s*([\d.,]+)/i);
     if (iptuMatch) iptuRobusto = parseTaxaRobusta(iptuMatch[1]);
-
-    let condMatch = textoCru.match(/condominio[\s\w():.-]*?(?:r\$|rs)?\s*([\d.,]+)/i);
-    if (condMatch) condRobusto = parseTaxaRobusta(condMatch[1]);
-    
-    // Agora, aplicamos a lógica de verificação e correção
     
     // Passo 1: Verificação de "Não Informado"
     const iptuNaoInformadoRegex = /iptu\s*:\s*(nao informado|a consultar|nao tem)/i;
@@ -562,28 +582,25 @@ if (!anuncio.tipo_imovel && anuncio.area_m2 && anuncio.area_m2 > 2000) {
         return;
     }
 
-    // Passo 2: Verificação de "total" ou "/ano" não divididos
+    // Passo 2: Verificação de "total" ou "/ano"
     const anualRegex = /iptu[\s\w():.-]*?(?:r\$|rs)?\s*([\d.,]+)\s*(total|anual|ano|\/ano)/i;
     let match = textoCru.match(anualRegex);
     if (match) {
         const valorAnual = parseTaxaRobusta(match[1]);
-        if (valorAnual && anuncio.iptu === valorAnual) { // Só corrige se o original não dividiu
-            anuncio.iptu = Math.round(valorAnual / 12);
-            return;
+        if (valorAnual) {
+            const valorMensal = Math.round(valorAnual / 12);
+            if(anuncio.iptu !== valorMensal) anuncio.iptu = valorMensal;
+            return; 
         }
     }
     
     // Passo 3: Verificação Cruzada (usando os valores robustos)
-    if (iptuRobusto && condRobusto && iptuRobusto >= condRobusto) {
+    if (iptuRobusto && anuncio.condominio && iptuRobusto >= anuncio.condominio) {
         let valorCorrigido = iptuRobusto;
         if (valorCorrigido > 1800 && !/mensal|mes/i.test(iptuMatch[0])) {
             valorCorrigido /= 12;
         }
         anuncio.iptu = Math.round(valorCorrigido);
-        // Também corrige o condomínio se ele foi pego errado pelo original
-        if (anuncio.condominio !== condRobusto) {
-             anuncio.condominio = Math.round(condRobusto);
-        }
         return;
     }
 
