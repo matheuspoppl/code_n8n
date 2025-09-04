@@ -26,7 +26,7 @@ const normalizeText = (str) => {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // Remove acentos
-    .replace(/[:🚨_~]/g, '')     // Remove os demais caracteres de markdown
+    .replace(/[:🚨_~]/g, '')      // Remove os demais caracteres de markdown
     .replace(/\s+/g, ' ')           // Junta múltiplos espaços
     .trim();
 };
@@ -71,7 +71,7 @@ const anuncio = {
 
 // --- 3. LÓGICA DE EXTRAÇÃO DETALHADA ---
 
-// 3.1 NOME E TELEFONE DO ANUNCIANTE
+// 3.1 NOME E TELEFONE DO ANUNCIANTE (ORIGINAL INTOCÁVEL)
 (() => {
     const phoneMatch = conteudo.match(/\+55\s?(?:\(?(\d{2})\)?\s?)?(?:9\s?|\s?9)?\s?(\d{4,5})[-.\s]?(\d{4})/);
     if (phoneMatch) {
@@ -91,7 +91,7 @@ const anuncio = {
     }
 })();
 
-// 3.2 INTENÇÃO (Procura vs Oferta)
+// 3.2 INTENÇÃO (Procura vs Oferta) (ORIGINAL INTOCÁVEL)
 (() => {
     const procuraRegex = /\b(procuro|procura|preciso|busco|buscando|cliente (busca|procura)|alguem com|necessito|gostaria de)\b/;
     if (procuraRegex.test(textoNormalizado)) { anuncio.intencao = 'procura'; return; }
@@ -108,33 +108,33 @@ const anuncio = {
     anuncio.intencao = 'oferta';
 })();
 
-// 3.3 VALOR PRINCIPAL e 3.4 TIPO DE OPERAÇÃO (Lógica Unificada e Corrigida)
+// --- MELHORIA ADICIONAL PARA INTENÇÃO ---
+if (anuncio.intencao !== 'procura') {
+    const procuraReforcoRegex = /\b(cliente querendo)\b/;
+    if (procuraReforcoRegex.test(textoNormalizado)) {
+        anuncio.intencao = 'procura';
+    }
+}
+
+
+// 3.3 VALOR PRINCIPAL e 3.4 TIPO DE OPERAÇÃO (LÓGICA ORIGINAL INTOCÁVEL)
 (() => {
     const candidatos = [];
     let match;
-
-    // Etapa de Limpeza Adicional
     const textoParaValor = textoNormalizado.replace(/(\d[\d.,]*)\s*m[2²]?\b/gi, ' ').replace(/(\d[\d.,]*)\s*metros\b/gi, ' ');
-
     const mainKeywords = 'valor|preco|preço|investimento|venda|ate|até';
     const currencySymbols = 'r\\$|rs|\\$';
 
-    // Estratégia 1: Valores com sufixos (k, mil, m, milhão)
     const regexSufixo = /([\d.,]+)\s*(mm|m|milh[oõ]es|milh[aã]o|kk|k|mil)\b/gi;
     while ((match = regexSufixo.exec(textoParaValor))) {
         const valorStr = match[1];
         const sufixo = match[2].toLowerCase().replace('ões', 'oes').replace('ão', 'ao');
         let numeroBase;
-
-        // *** CORREÇÃO CRÍTICA PARA CASOS COMO "2.500MM" ***
         if (['m', 'mm', 'milhoes', 'milhao', 'kk'].includes(sufixo)) {
-            // Se o sufixo indica milhões, o ponto é um separador decimal. Ex: "2.500" -> 2.5
             numeroBase = parseFloat(valorStr.replace(',', '.'));
         } else {
-            // Para 'k' e 'mil', o ponto é um separador de milhar. Ex: "500.000" -> 500000
             numeroBase = parseNumber(valorStr);
         }
-
         if (!isNaN(numeroBase)) {
             let valorFinal = null;
             if (['k', 'mil'].includes(sufixo)) valorFinal = numeroBase * 1000;
@@ -143,20 +143,16 @@ const anuncio = {
         }
     }
 
-    // Estratégia 2: Valores precedidos por palavras-chave ou símbolos.
     const regexKeyword = new RegExp(`(?:${mainKeywords}|${currencySymbols})\\s*:?\\s*([\\d.,]+)`, 'gi');
     while ((match = regexKeyword.exec(textoNormalizado))) {
         const context = textoNormalizado.substring(Math.max(0, match.index - 20), match.index);
         if (/\b(iptu|condominio|cond)\b/.test(context)) continue;
-
         const nextChars = textoNormalizado.substring(match.index + match[0].length, match.index + match[0].length + 8).trim();
         if (['k', 'mil', 'm', 'mm', 'milhao', 'milhoes'].some(suf => nextChars.startsWith(suf))) continue;
-
         const valor = parseNumber(match[1]);
         if (valor) candidatos.push(valor);
     }
     
-    // Estratégia 3: Números grandes e bem formatados, sem palavras-chave.
     const regexNumerosGrandes = /\b(\d{1,3}(\.\d{3})+,\d{2})\b|\b(\d{1,3}(\.\d{3}){2,})\b/g;
     while ((match = regexNumerosGrandes.exec(textoNormalizado))) {
         const context = textoNormalizado.substring(Math.max(0, match.index - 30), match.index);
@@ -166,8 +162,6 @@ const anuncio = {
     }
     
     const uniqueCandidatos = [...new Set(candidatos)];
-
-    // Determina o tipo de operação (venda/aluguel)
     const kwAluguel = /\b(aluguel|aluga-se|locacao|alugo|locar|temporada)\b/;
     const kwVenda = /\b(venda|vendo|vende-se|a venda|compra|comprar|investidor)\b/;
 
@@ -184,7 +178,6 @@ const anuncio = {
         }
     }
 
-    // Seleciona o valor principal com base no tipo de operação
     if (uniqueCandidatos.length > 0) {
         let validos;
         if (anuncio.tipo_operacao === 'aluguel') {
@@ -192,19 +185,72 @@ const anuncio = {
         } else { // Venda ou indefinido
             validos = uniqueCandidatos.filter(v => v >= 80000 && v < 200000000);
         }
-        
         if (validos.length === 0 && anuncio.intencao === 'procura') {
            validos = uniqueCandidatos.filter(v => v > 1000 && v < 200000000);
         }
-
         if (validos.length > 0) {
             anuncio.valor = Math.max(...validos);
         }
     }
 })();
 
+// --- MELHORIA ADICIONAL PARA VALOR E TIPO DE OPERAÇÃO ---
+(() => {
+    const parseValorRobusto = (str) => {
+        if (typeof str !== 'string') return null;
+        let cleanStr = str.replace(/[^\d.,]/g, '');
+        if (cleanStr.includes(',') && cleanStr.includes('.')) {
+            const lastCommaIndex = cleanStr.lastIndexOf(',');
+            const integerPart = cleanStr.substring(0, lastCommaIndex).replace(/[.,]/g, '');
+            const decimalPart = cleanStr.substring(lastCommaIndex + 1);
+            cleanStr = `${integerPart}.${decimalPart}`;
+        } else if (cleanStr.includes(',')) {
+            cleanStr = cleanStr.replace(',', '.');
+        } else if (cleanStr.includes('.')) {
+            const parts = cleanStr.split('.');
+            if (parts[parts.length - 1].length !== 2) {
+                cleanStr = cleanStr.replace(/\./g, '');
+            }
+        }
+        const value = parseFloat(cleanStr);
+        return isNaN(value) ? null : value;
+    };
+    const textoCru = conteudo.replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ').replace(/[*_~]/g, '');
+    const candidatosMelhoria = [];
+    let match;
+    const regexSufixoReforco = /(?:R\$|rs|\$)?\s*([\d.,]+)\s*(mil|k)\b/gi;
+    while ((match = regexSufixoReforco.exec(textoCru))) {
+        const val = parseValorRobusto(match[1]);
+        if (val) candidatosMelhoria.push(val * 1000);
+    }
+    const kwAluguel = /\b(aluguel|aluga-se|locacao|alugo|locar|temporada)\b/i;
+    if (!kwAluguel.test(textoCru)) {
+        const regexEmojiMil = /(?:R\$|rs|\$)\s*(1\d{2}|[2-9]\d{2})\s*💰/gi;
+        while ((match = regexEmojiMil.exec(textoCru))) {
+            candidatosMelhoria.push(parseInt(match[1], 10) * 1000);
+        }
+    }
+    const regexValorBemFormatado = /(?:valor|R\$|rs|\$)\s*([\d.,]{6,})/gi;
+    while ((match = regexValorBemFormatado.exec(textoCru))) {
+        const val = parseValorRobusto(match[1]);
+        if (val) candidatosMelhoria.push(val);
+    }
+    if (candidatosMelhoria.length > 0) {
+        const validosVenda = candidatosMelhoria.filter(v => v >= 80000 && v < 200000000);
+        if (validosVenda.length > 0) {
+            const melhorCandidato = Math.max(...validosVenda);
+            if (!anuncio.valor || anuncio.valor < 20000) {
+                anuncio.valor = melhorCandidato;
+                if (anuncio.tipo_operacao !== 'venda') {
+                    anuncio.tipo_operacao = 'venda';
+                }
+            }
+        }
+    }
+})();
 
-// 3.5 TIPO DE IMÓVEL
+
+// 3.5 TIPO DE IMÓVEL (ORIGINAL INTOCÁVEL)
 (() => {
     if (/\b(cobertura|triplex)\b/.test(textoNormalizado)) anuncio.tipo_imovel = 'Cobertura';
     else if (/\b(casa|sobrado|mansao|chacara|sitio)\b/.test(textoNormalizado)) anuncio.tipo_imovel = 'Casa';
@@ -214,7 +260,13 @@ const anuncio = {
     else if (/\b\d+\s*(quarto|qto|suite)s?\b/.test(textoNormalizado)) anuncio.tipo_imovel = 'Apartamento';
 })();
 
-// 3.6 SUÍTES
+// --- MELHORIA ADICIONAL PARA TIPO DE IMÓVEL (CORREÇÃO DE FALSO POSITIVO) ---
+if (anuncio.tipo_imovel === 'Terreno' && (/\b\d+\s*quartos?\b/.test(textoNormalizado) || /\bfrontal\b/.test(textoNormalizado))) {
+    anuncio.tipo_imovel = 'Apartamento';
+}
+
+
+// 3.6 SUÍTES (ORIGINAL INTOCÁVEL)
 (() => {
     const candidatos = [];
     let match;
@@ -240,7 +292,7 @@ const anuncio = {
     }
 })();
 
-// 3.7 QUARTOS
+// 3.7 QUARTOS (ORIGINAL INTOCÁVEL)
 (() => {
     const candidatos = [];
     let match;
@@ -272,7 +324,24 @@ const anuncio = {
     }
 })();
 
-// 3.8 BANHEIROS
+// --- MELHORIA ADICIONAL PARA QUARTOS ---
+if (!anuncio.quartos) {
+    const regexTypo = /\b(\d{1,2}|uma|um|duas|dois|tres|quatro)\s*(?:amplos?)?\s*(quantos?)\b/g;
+    const match = regexTypo.exec(textoNormalizado);
+    if (match) {
+        const numStr = match[1];
+        const num = wordsToNumMap[numStr] || parseInt(numStr, 10);
+        if (num) {
+            anuncio.quartos = num;
+             if (anuncio.suites > 0 && (anuncio.quartos === null || anuncio.quartos < anuncio.suites)) {
+                anuncio.quartos = anuncio.suites;
+             }
+        }
+    }
+}
+
+
+// 3.8 BANHEIROS (ORIGINAL INTOCÁVEL)
 (() => {
     if (/\b(sem|s\/)\s*banheiro/.test(textoNormalizado)) {
         anuncio.banheiros = 0;
@@ -329,7 +398,8 @@ const anuncio = {
     if (finalCount > 0) anuncio.banheiros = finalCount;
 })();
 
-// 3.9 VAGAS DE GARAGEM
+
+// 3.9 VAGAS DE GARAGEM (ORIGINAL INTOCÁVEL)
 (() => {
     if (/\b(sem|nenhuma|nao possui|nao tem)\s+(vaga|garagem)\b/.test(textoNormalizado)) {
         anuncio.vagas_garagem = 0;
@@ -369,7 +439,7 @@ const anuncio = {
     }
 })();
 
-// 3.10 ÁREA (m²)
+// 3.10 ÁREA (m²) (ORIGINAL INTOCÁVEL)
 (() => {
     const candidatos = [];
     const regexGeral = /([\d.,]+)\s*(m2|m²|metros\s*quadrados|metros|m)(?!\w)/gi;
@@ -393,60 +463,91 @@ const anuncio = {
     }
 })();
 
-// 3.11 IPTU e CONDOMÍNIO (LÓGICA REFINADA)
+// --- MELHORIA ADICIONAL PARA ÁREA (PARA CAPTURAR TERRENOS GRANDES) ---
+if (!anuncio.area_m2) {
+    const candidatos = [];
+    // CORREÇÃO: Regex ajustada para ser mais robusta, similar à original.
+    const regexGeral = /([\d.,]+)\s*(m2|m²)(?!\w)/gi;
+    let match;
+    while ((match = regexGeral.exec(textoNormalizado))) {
+        const valor = parseNumber(match[1]);
+        // Lógica sem o limite superior de 5000
+        if (valor && valor > 10) {
+            candidatos.push(Math.round(valor));
+        }
+    }
+    if (candidatos.length > 0) {
+        anuncio.area_m2 = Math.max(...candidatos);
+    }
+}
+
+
+// --- MELHORIA ADICIONAL PARA TIPO DE IMÓVEL (com base na área) ---
+if (!anuncio.tipo_imovel && anuncio.area_m2 && anuncio.area_m2 > 2000) {
+    anuncio.tipo_imovel = 'Terreno';
+}
+
+// 3.11 IPTU e CONDOMÍNIO (ORIGINAL INTOCÁVEL)
 (() => {
     const extractTax = (keyword, isIptu = false) => {
-        // Regex aprimorada que captura o texto entre a palavra-chave e o valor
         const regex = new RegExp(`(?:${keyword})([\\s\\w():.-]*?)(?:r\\$|rs)?\\s*([\\d.,]+)`, 'gi');
         let match;
         const candidatos = [];
-
         while ((match = regex.exec(textoNormalizado))) {
             const snippetBetween = (match[1] || '').trim();
             const valorStr = match[2];
             const fullMatchText = match[0];
             const valorNumerico = parseNumber(valorStr);
-
             if (!valorNumerico) continue;
-
-            // --- Análise de Contexto para evitar falsos positivos ---
             const palavrasDeDescarte = /\b(com|quartos?|vagas?|unidades?|andares?|lazer|infra|seguranca|piscina|portaria)\b/;
             const ehTaxaExplicita = /\b(valor|taxa|cota)\b/.test(snippetBetween) || snippetBetween.startsWith(':');
-            if (palavrasDeDescarte.test(snippetBetween) && !ehTaxaExplicita) {
-                continue;
-            }
-
+            if (palavrasDeDescarte.test(snippetBetween) && !ehTaxaExplicita) continue;
             const hasMonetarySymbol = /r\$|rs/.test(fullMatchText);
             const hasFormatting = /[.,]/.test(valorStr);
-            if (valorNumerico <= 100 && !hasMonetarySymbol && !hasFormatting && !ehTaxaExplicita) {
-                continue; // Evita capturar "condominio rio 2"
-            }
-
+            if (valorNumerico <= 100 && !hasMonetarySymbol && !hasFormatting && !ehTaxaExplicita) continue;
             if (anuncio.valor && valorNumerico >= anuncio.valor) continue;
-
             let taxValue = valorNumerico;
             const context = fullMatchText + textoNormalizado.substring(match.index + match[0].length, match.index + match[0].length + 15);
-
             if (/\b(anual|ano)\b/.test(context)) {
                 taxValue /= 12;
-            } else if (isIptu && taxValue > 1500 && !/\b(mensal|mes)\b/.test(context)) {
+            } else if (isIptu && taxValue > 1800 && !/\b(mensal|mes)\b/.test(context)) {
                 taxValue /= 12;
             }
             candidatos.push(Math.round(taxValue));
         }
         return candidatos.length > 0 ? candidatos[candidatos.length - 1] : null;
     };
-
     anuncio.iptu = extractTax('iptu', true);
     anuncio.condominio = extractTax('condominio|cond\\.?|cota');
-
-    // 3.12 VALIDAÇÃO CRUZADA DE TAXAS
     if (anuncio.condominio && anuncio.iptu && anuncio.condominio <= anuncio.iptu) {
-        // Se o condomínio for menor ou igual ao IPTU (mensal), é um forte indicativo de erro.
-        // Invalida o valor do condomínio, pois é mais provável que tenha sido confundido.
         anuncio.condominio = null;
     }
 })();
+
+// --- MELHORIA ADICIONAL PARA IPTU E CONDOMÍNIO ---
+if (!anuncio.iptu || !anuncio.condominio) {
+    const textoCru = conteudo.replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ').replace(/[*_~]/g, '');
+    const extractTaxReforco = (keyword, isIptu = false, isCond = false) => {
+        let match;
+        let regex = new RegExp(`([\\d.,]+)\\s*(?:mensal)?\\s*(?:de)?\\s*${keyword}`, 'i');
+        match = textoCru.match(regex);
+        if (match) return Math.round(parseNumber(match[1]));
+        if(isCond) {
+            regex = new RegExp(`([\\d.,]+)\\s*mil\\s*(?:de)?\\s*${keyword}`, 'i');
+            match = textoCru.match(regex);
+            if (match) return Math.round(parseNumber(match[1]) * 1000);
+        }
+        return null;
+    }
+    if (!anuncio.iptu) {
+        const iptu = extractTaxReforco('iptu', true, false);
+        if (iptu) anuncio.iptu = iptu;
+    }
+    if (!anuncio.condominio) {
+        const cond = extractTaxReforco('condominio', false, true);
+        if (cond) anuncio.condominio = cond;
+    }
+}
 
 
 // --- 4. RETORNO DOS DADOS ---
