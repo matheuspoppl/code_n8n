@@ -714,7 +714,62 @@ if (!anuncio.tipo_imovel && anuncio.area_m2 && anuncio.area_m2 > 2000) {
 
 })();
 
+// ===================================================================================
+// === NOVO BLOCO DE AUDITORIA E CORREÇÃO (INSERIR APÓS O CÓDIGO ORIGINAL) ==========
+// ===================================================================================
+// Este bloco NÃO ALTERA a lógica original. Ele apenas verifica os resultados
+// do objeto 'anuncio' e aplica correções específicas para os problemas conhecidos.
+
+(() => {
+
+    // --- 1. AUDITORIA E CORREÇÃO DO TELEFONE_ANUNCIANTE ---
+    // Objetivo: Corrigir números de celular que perderam o '9' inicial.
+
+    // Verifica se o telefone foi extraído, mas está com a contagem de dígitos incorreta (12 em vez de 13).
+    if (anuncio.telefone_anunciante && anuncio.telefone_anunciante.length === 12) {
+        
+        // Usa uma regex mais precisa que FORÇA a captura do 9 inicial em celulares.
+        // Padrão: +55 (DDD) 9XXXX-XXXX
+        const regexTelefoneCorreto = /\+55\s*\(?(\d{2})\)?\s*(9\d{4,5})[-.\s]?(\d{4})/g;
+        const matchCorreto = conteudo.match(regexTelefoneCorreto);
+
+        if (matchCorreto) {
+            // Se encontrar um número no formato correto, limpa-o de caracteres não numéricos
+            // e o usa para sobrescrever o valor incorreto.
+            const telefoneCorrigido = matchCorreto[0].replace(/\D/g, '');
+            
+            // Apenas sobrescreve se o resultado for um número válido de 13 dígitos.
+            if (telefoneCorrigido.length === 13) {
+                anuncio.telefone_anunciante = telefoneCorrigido;
+            }
+        }
+    }
+
+
+    // --- 2. AUDITORIA E CORREÇÃO DA INTENCAO ---
+    // Objetivo: Corrigir anúncios de 'oferta' que foram erroneamente classificados como 'procura'.
+
+    // A condição principal é verificar se a lógica original concluiu a intenção como 'procura'.
+    if (anuncio.intencao === 'procura') {
+
+        // Define uma lista de palavras-chave inequívocas de OFERTA.
+        // Estas palavras têm maior peso do que as palavras ambíguas de 'procura' (como "gostaria de").
+        const palavrasChaveOfertaForte = /\b(venda|vendo|vende-se|alugo|aluga-se|locacao|oportunidade|imperdivel|disponivel para venda|disponivel para aluguel|promocao|oferta)\b/i;
+
+        // Verifica no texto normalizado (minúsculo e sem acentos) se alguma dessas palavras fortes de oferta existe.
+        // Usamos o textoNormalizado que já foi processado no início do script original.
+        if (palavrasChaveOfertaForte.test(textoNormalizado)) {
+            // Se uma palavra forte de oferta for encontrada, a decisão original estava errada.
+            // Ação de correção: sobrescreve a intenção para 'oferta'.
+            anuncio.intencao = 'oferta';
+        }
+    }
+
+})(); // Fim do bloco de auditoria.
+
+// A linha de retorno original permanece a mesma, agora retornando o objeto 'anuncio' potencialmente corrigido.
+return { caracteristicas: anuncio };
 
 // --- 4. RETORNO DOS DADOS ---
 // Retorna o objeto final no formato que o n8n espera para os próximos nós.
-return { caracteristicas: anuncio };
+//return { caracteristicas: anuncio };
