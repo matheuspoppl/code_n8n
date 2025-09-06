@@ -168,3 +168,84 @@ regioes: [
 condominios: [
     'mio residencial' // (Adicionar à lista existente)
 ]
+
+/* Copie e adicione estes termos na sua knowledgeBase */
+
+// Em 'Barra Olímpica':
+condominios: [
+    'joia da barra' // (ID 374)
+],
+
+// Em 'Vargem Pequena':
+condominios: [
+    'novolar' // (ID 492 - Assumindo que "Novo Lar" seja Novolar)
+],
+
+// Em 'Recreio dos Bandeirantes':
+ruas: [
+    'avenida ailton henrique da costa' // (ID 43)
+],
+
+// Em 'Barra da Tijuca':
+condominios: [
+    'santa monica personal house' // (ID 551)
+]
+
+1. Prompt para Melhorias Futuras (Baseado no Lote Final)
+Este documento consolida todas as novas oportunidades de aprimoramento que encontramos. Salve-o para nossa próxima sessão de desenvolvimento.
+
+Seção 1: Aprimoramentos no Script de caracteristicas
+
+1.1: Refinar Extração de valor
+
+Cenário: O script falhou em extrair o valor nos anúncios ID 372 ("Valor Aluguel: 13.500,00"), ID 104 (valor riscado ~~R$ 470.000.00~~ foi pego em vez do valor final 🚨 R$ 450.000,00 🚨), e ID 613 ("VALOR : R$ 480MM").
+
+Requisito:
+
+Modificar a regex de valor para reconhecer Valor Aluguel: como uma expressão válida.
+
+Aprimorar a lógica para que, quando encontrar múltiplos valores, priorize o último ou aquele que não está riscado (~~...~~).
+
+Reforçar o reconhecimento de MM como milhão, além de M.
+
+1.2: Refinar Extração de condominio e iptu
+
+Cenário: O script extraiu o valor do condomínio incorretamente nos anúncios ID 321 (pegou o benefício mensal em vez do valor correto), ID 392 (pegou null em vez de 1.562) e ID 570 (confundiu o valor de um terreno com o valor do condomínio).
+
+Requisito:
+
+Tornar as regex de condominio e iptu mais rigorosas para que capturem apenas números que estão imediatamente adjacentes às palavras-chave (ex: Cond: [valor]).
+
+Adicionar uma lógica para evitar que a regex de condomínio capture valores monetários de venda (ex: um valor de 7 dígitos não é um valor de condomínio).
+
+1.3: Melhorar Contagem de quartos e suites em Descrições Complexas
+
+Cenário: No anúncio ID 373, a descrição de um duplex ("1 suíte no 1° piso" e "suíte no 2° piso") resultou na contagem de apenas 1 quarto, quando o correto seria 2.
+
+Requisito: Aprimorar a lógica de contagem para somar características que são descritas em seções separadas do texto, como "1° piso" e "2° piso".
+
+1.4: Corrigir intencao em Anúncios de Busca
+
+Cenário: Os anúncios de busca ID 465 ("Procuro apto...") e ID 466/467 ("Cliente direto busca...") foram incorretamente classificados como "oferta".
+
+Requisito: Adicionar as palavras-chave procuro e busca à procuraRegex para identificar corretamente a intenção.
+
+Seção 2: Aprimoramentos no Script de localizacao (Base de Conhecimento)
+
+2.1: Lidar com Ambiguidade de Localização (Permuta)
+
+Cenário: Nos anúncios ID 271 e ID 590, a localização principal do imóvel foi confundida com a localização desejada para a permuta.
+
+Requisito: Desenvolver uma lógica que identifique a palavra-chave permuta e dê um peso menor (ou ignore) as localidades mencionadas após ela, priorizando a primeira localidade encontrada no texto como a principal.
+
+2.2: Lidar com Ambiguidade de Localização (Termos Genéricos)
+
+Cenário: O anúncio ID 361 mencionava "CASA EM VARGEM", e o script erroneamente associou à Barra da Tijuca devido à menção de permuta.
+
+Requisito: Adicionar o termo genérico 'vargem' como um apelido tanto para Vargem Grande quanto para Vargem Pequena. Isso fará com que ambos pontuem e, na ausência de mais informações, a decisão ficará em aberto em vez de errada.
+
+2.3: Adicionar Novas Localidades à knowledgeBase
+
+Cenário: Vários anúncios, como ID 374 ("Jóia da Barra") e ID 492 ("Novo Lar"), continham nomes de condomínios que não estavam em nossa base.
+
+Requisito: Incorporar a lista de novas localidades (fornecida abaixo) na knowledgeBase para aumentar a cobertura e a precisão da identificação.
