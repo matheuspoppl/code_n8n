@@ -365,3 +365,20 @@ Contagem de Quartos: A contagem de quartos deve ser aprimorada para somar corret
     "regioes": ["espigao"]
   }
 }
+--------------
+Prompt de Melhorias para o Código (Consolidado)
+Nenhum novo tipo de erro foi detectado. Os erros deste lote reforçam a necessidade das melhorias já listadas, especialmente:
+
+Parse de Valores: Melhorar a regex para capturar valores com sufixos como "M" (milhões).
+
+Lógica de intenção: Continuar refinando as palavras-chave de "procura".
+
+Contagem de Cômodos: Consolidar a regra de somar quartos e suítes com "dependências completas".
+{
+  "Itanhangá": {
+    "bairros": ["itanhanga"]
+  },
+  "Recreio dos Bandeirantes": {
+    "ruas": ["rua cel. joão olintho"]
+  }
+}
