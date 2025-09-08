@@ -1,11 +1,12 @@
 // ===================================================================================
-// === NÓ DE AUDITORIA V12 - BASE V5 + CORREÇÕES CIRÚRGICAS PARA TAXAS ===
+// === NÓ DE AUDITORIA V13 - A V5 DEFINITIVA COM CORREÇÃO PRECISA DE TAXAS ===
 // ===================================================================================
-// Esta versão volta à estabilidade e confiabilidade da V5.
-// Abandona completamente as lógicas complexas que falharam.
-// Adiciona uma nova função 'auditarTaxasV12' focada em CORRIGIR erros
-// específicos de IPTU (isento, anual, parcelado) em vez de redescobrir valores,
-// garantindo consistência e performance.
+// Esta é a versão mais estável. Retornamos à base confiável da V5 e adicionamos
+// um módulo de auditoria de taxas simples, direto e robusto.
+// - Sem hierarquias complexas.
+// - Foco em regex de alta precisão para encontrar e corrigir erros específicos
+//   de IPTU (isento, anual, parcelado) e Condomínio.
+// - Objetivo: Máxima confiabilidade e consistência.
 
 // --- 1. CONFIGURAÇÃO INICIAL ---
 const extracaoInicial = $json.caracteristicas;
@@ -16,9 +17,8 @@ if (!extracaoInicial || !mensagemOriginal || typeof mensagemOriginal !== 'string
 }
 
 const anuncioCorrigido = JSON.parse(JSON.stringify(extracaoInicial));
-const valorOriginal = extracaoInicial.valor;
 
-// --- 2. FUNÇÕES DE AJUDA (DA BASE V5) ---
+// --- 2. FUNÇÕES DE AJUDA ---
 
 const parseNumero = (str, contexto = '') => {
     if (typeof str !== 'string') return null;
@@ -30,21 +30,27 @@ const parseNumero = (str, contexto = '') => {
     if (cleanStr.endsWith('mil')) { multiplicador = 1000; cleanStr = cleanStr.slice(0, -3); }
     else if (cleanStr.endsWith('k')) { multiplicador = 1000; cleanStr = cleanStr.slice(0, -1); }
     else if (cleanStr.includes('milh')) { multiplicador = 1000000; cleanStr = cleanStr.replace(/milh[aão|oes].*/, ''); }
-
-    if (/[.,]\d{2}$/.test(cleanStr)) {
-        const decimalPart = cleanStr.slice(-2);
-        const integerPart = cleanStr.slice(0, -3).replace(/[.,]/g, '');
+    
+    // Lógica robusta para tratar múltiplos pontos (ex: 2.519.05) e vírgulas
+    const dotCount = (cleanStr.match(/\./g) || []).length;
+    if (dotCount > 1 && !cleanStr.includes(',')) {
+        const lastDotIndex = cleanStr.lastIndexOf('.');
+        const integerPart = cleanStr.substring(0, lastDotIndex).replace(/\./g, '');
+        const decimalPart = cleanStr.substring(lastDotIndex + 1);
         cleanStr = `${integerPart}.${decimalPart}`;
     } else {
-        cleanStr = cleanStr.replace(/[.,]/g, '');
+        cleanStr = cleanStr.replace(/\./g, '').replace(',', '.');
     }
+
     const valor = parseFloat(cleanStr);
     return isNaN(valor) ? null : Math.round(valor * multiplicador);
 };
 
-// --- 3. AUDITORIAS MODULARES (DA BASE V5) ---
+
+// --- 3. AUDITORIAS MODULARES (BASE V5) ---
 
 const auditarValorImovel = () => {
+    const valorOriginal = anuncioCorrigido.valor;
     const textoCru = mensagemOriginal.replace(/~~/g, ' riscado ');
     let candidatos = [];
     const padroesDePreco = [
@@ -105,82 +111,71 @@ const auditarIntencaoEFiltrar = () => {
     return true;
 };
 
-// --- 4. NOVA AUDITORIA DE TAXAS (V12) ---
-const auditarTaxasV12 = () => {
+// NOVO MÓDULO DE AUDITORIA PARA TAXAS (V13)
+const auditarTaxas = () => {
     const textoCru = mensagemOriginal;
 
-    // --- CORREÇÃO DE IPTU ---
-    // Regra 1: "IPTU Isento"
+    // --- AUDITORIA DE IPTU ---
+    let iptuCorrigido = null;
     if (/iptu\s*(isento|isenta)/i.test(textoCru)) {
-        anuncioCorrigido.iptu = 0;
+        iptuCorrigido = 0;
     } else {
-        // Regra 2: Busca por valor de IPTU com contexto de anual ou parcelado
-        const regexIptuAnual = /iptu\s*[:;.]?\s*(?:r\$|rs)?\s*([\d.,]+)\s*(?:\(?\s*(anual|ao ano|\/ano)\s*\)?)/i;
-        const regexIptuParcelado = /iptu:?.*?(\d+)\s*x\s*de\s*\$?\s*([\d.,]+)/i;
-        const regexIptuGeral = /iptu\s*[:;.]?\s*(?:r\$|rs)?\s*([\d.,]+)/i;
-        
-        const matchAnual = textoCru.match(regexIptuAnual);
-        const matchParcelado = textoCru.match(regexIptuParcelado);
-        const matchGeral = textoCru.match(regexIptuGeral);
+        const regexIptu = /(iptu\s*[:;.]?\s*(?:r\$|rs)?\s*([\d.,]+)|([\d.,]+)\s*de\s*iptu)[\s\S]{0,15}(anual|ano|\/ano|m[eê]s|mensal|cota|parcelado em (\d+)\s*x)/i;
+        const match = textoCru.match(regexIptu);
 
-        let iptuCorrigido = null;
+        if (match) {
+            const valorStr = match[2] || match[3];
+            let valor = parseNumero(valorStr);
 
-        if (matchAnual) {
-            const valor = parseNumero(matchAnual[1]);
-            if (valor) iptuCorrigido = Math.round(valor / 12);
-        } else if (matchParcelado) {
-            const valor = parseNumero(matchParcelado[2]);
-            if (valor) iptuCorrigido = valor;
-        } else if (matchGeral) {
-            const valor = parseNumero(matchGeral[1]);
-            // Se o valor for muito alto, assume que é anual mesmo sem a palavra
-            if (valor && valor > 2500 && !/mes|mensal|cota/i.test(matchGeral[0])) {
-                 iptuCorrigido = Math.round(valor / 12);
-            } else if (valor) {
-                 iptuCorrigido = valor;
+            if (valor) {
+                const contexto = match[0].toLowerCase();
+                const parcelas = match[5] ? parseInt(match[5], 10) : 12;
+
+                if (/anual|ano|\/ano/.test(contexto)) {
+                    iptuCorrigido = Math.round(valor / 12);
+                } else if (/parcelado em/.test(contexto) || /cota/.test(contexto)) {
+                    // Se encontrar o número de parcelas, usa, senão assume 10 (padrão comum)
+                    const divisor = parcelas > 1 ? parcelas : 10;
+                    // Procura o valor total para dividir, se disponível
+                    const matchTotal = contexto.match(/([\d.,]+)\/ano, parcelado/);
+                    if(matchTotal) {
+                        const valorTotal = parseNumero(matchTotal[1]);
+                        iptuCorrigido = Math.round(valorTotal / divisor);
+                    } else {
+                       iptuCorrigido = valor; // Assume que o valor já é o da parcela
+                    }
+                } else if (valor > 2500 && !/m[eê]s|mensal/.test(contexto)) {
+                    iptuCorrigido = Math.round(valor / 12);
+                } else {
+                    iptuCorrigido = valor;
+                }
             }
         }
-        
-        if (iptuCorrigido !== null) {
-            anuncioCorrigido.iptu = iptuCorrigido;
-        }
     }
-
-    // --- CORREÇÃO DE CONDOMÍNIO ---
+    
+    // --- AUDITORIA DE CONDOMÍNIO ---
+    let condCorrigido = null;
     const regexCond = /(?:condom[ií]nio|cond\.?|taxas)\s*[:;]?\s*(?:r\$|rs)?\s*([\d.,]+)/i;
     const matchCond = textoCru.match(regexCond);
     if(matchCond){
         const valor = parseNumero(matchCond[1]);
-        if(valor && valor > 50 && valor < 30000){
-            anuncioCorrigido.condominio = valor;
+        if(valor && valor > 50 && valor < 30000 && anuncioCorrigido.valor && valor < anuncioCorrigido.valor) {
+            condCorrigido = valor;
         }
     }
+    
+    // Aplica as correções apenas se forem válidas
+    if (iptuCorrigido !== null) anuncioCorrigido.iptu = iptuCorrigido;
+    if (condCorrigido !== null) anuncioCorrigido.condominio = condCorrigido;
 };
 
 
-// --- 5. EXECUÇÃO E VALIDAÇÃO FINAL ---
+// --- 5. EXECUÇÃO ---
 auditarValorImovel();
 const adValido = auditarIntencaoEFiltrar();
 
 if (adValido) {
-    auditarTaxasV12();
-
-    // Validação final de plausibilidade e hierarquia simples
-    if (anuncioCorrigido.valor && anuncioCorrigido.condominio && anuncioCorrigido.condominio >= anuncioCorrigido.valor) {
-        anuncioCorrigido.condominio = null;
-    }
-    if (anuncioCorrigido.condominio && anuncioCorrigido.iptu && anuncioCorrigido.iptu >= anuncioCorrigido.condominio) {
-        anuncioCorrigido.iptu = null;
-    }
-    
-    // Ajuste Fino do Tipo de Operação
-    if (anuncioCorrigido.valor && anuncioCorrigido.valor !== valorOriginal) {
-        if (anuncioCorrigido.valor >= 80000) {
-            anuncioCorrigido.tipo_operacao = 'venda';
-        } else if (anuncioCorrigido.valor > 0) {
-            anuncioCorrigido.tipo_operacao = 'aluguel';
-        }
-    }
+    auditarTaxas();
 }
 
 // --- 6. RETORNO DOS DADOS ---
