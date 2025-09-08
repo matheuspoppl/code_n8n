@@ -382,3 +382,4 @@ Contagem de Cômodos: Consolidar a regra de somar quartos e suítes com "depend�
     "ruas": ["rua cel. joão olintho"]
   }
 }
+------------------------------
