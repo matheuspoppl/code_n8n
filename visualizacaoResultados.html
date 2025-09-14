@@ -1,0 +1,246 @@
+/*
+ * =================================================================================
+ * == Gerador de Página de Leads v4.2 (Final Corrigido) ==
+ * =================================================================================
+ * v4.2: Corrige o erro "anuncioTitulo is not defined" ao gerar o título do anúncio
+ * diretamente no escopo correto, garantindo compatibilidade com o ambiente n8n.
+ * =================================================================================
+ */
+
+// --- ETAPA 1: RECEBER E PROCESSAR OS DADOS DE ENTRADA ---
+
+const input = $input.first()?.json;
+
+const returnErrorHtml = async (message) => {
+  const errorHtml = `<html><body><h1>${message}</h1></body></html>`;
+  const buffer = Buffer.from(errorHtml, 'utf8');
+  const binaryData = await this.helpers.prepareBinaryData(buffer, 'error.html', 'text/html');
+  return [{ json: {}, binary: { data: binaryData } }];
+};
+
+if (!input || !Array.isArray(input.oportunidades)) {
+  return returnErrorHtml("Erro: Formato de dados de entrada inválido ou nenhuma oportunidade encontrada.");
+}
+
+const anuncioOriginal = input;
+const todasAsOportunidades = input.oportunidades;
+const allLeads = [];
+
+for (const item of todasAsOportunidades) {
+  if (item.clientes_diretos) {
+    allLeads.push({ ...item.clientes_diretos, tipo: 'Cliente Direto' });
+  } else if (item.clientes_parceiros) {
+    allLeads.push({ ...item.clientes_parceiros, tipo: 'Parceiro' });
+  }
+}
+
+if (allLeads.length === 0) {
+  return returnErrorHtml("Nenhum lead compatível foi encontrado para este anúncio.");
+}
+
+// --- ETAPA 2: ORDENAR POR RELEVÂNCIA ---
+
+allLeads.sort((a, b) => {
+  const scoreA = a.pontuacao_match ?? -1;
+  const scoreB = b.pontuacao_match ?? -1;
+  return scoreB - scoreA;
+});
+
+// --- ETAPA 3: GERAR A PÁGINA HTML ---
+
+const formatarData = (dataISO) => {
+  if (!dataISO) return 'Não informada';
+  const data = new Date(dataISO);
+  data.setHours(data.getHours() - 3);
+  return data.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+const gerarListaDetalhes = (dados, tipoDados) => {
+    const isOferta = tipoDados === 'oferta';
+    const titulo = isOferta ? 'Dados da Oferta:' : 'Dados da Procura:';
+
+    const detalhes = [
+        { label: 'Tipo de Imóvel', value: dados.tipo_imovel },
+        { label: 'Operação', value: dados.tipo_operacao },
+        { label: 'Bairro', value: dados.bairro || dados.localizacao?.bairro },
+        { label: 'Região', value: dados.localizacao?.regiao },
+        { label: 'Condomínio', value: dados.localizacao?.condominio },
+        { label: 'Rua', value: dados.localizacao?.rua },
+        { label: 'Quartos', value: dados.quartos },
+        { label: 'Suítes', value: dados.suites },
+        { label: 'Banheiros', value: dados.banheiros },
+        { label: 'Vagas', value: dados.vagas_garagem },
+        { label: 'Área (m²)', value: dados.area_m2 },
+        { label: isOferta ? 'Valor' : 'Orçamento', value: dados.valor ? `R$ ${parseInt(dados.valor).toLocaleString('pt-BR')}` : null },
+        { label: 'Condomínio', value: dados.condominio ? `R$ ${parseInt(dados.condominio).toLocaleString('pt-BR')}` : null },
+        { label: 'IPTU', value: dados.iptu ? `R$ ${parseInt(dados.iptu).toLocaleString('pt-BR')}` : null },
+    ];
+
+    const listaHtml = detalhes
+        .filter(item => item.value)
+        .map(item => `<li><strong>${item.label}:</strong> ${item.value}</li>`)
+        .join('');
+
+    return listaHtml ? `<strong>${titulo}</strong><ul>${listaHtml}</ul>` : '';
+};
+
+const isOfertaOriginal = anuncioOriginal.intencao === 'oferta';
+const tituloPrincipal = isOfertaOriginal 
+    ? "Oportunidade: Imóvel Oferecido e Potenciais Clientes Encontrados"
+    : "Oportunidade: Cliente Procurando e Potenciais Imóveis Encontrados";
+const tituloContador = isOfertaOriginal
+    ? `${allLeads.length} Potenciais Clientes Encontrados`
+    : `${allLeads.length} Potenciais Imóveis Encontrados`;
+
+const nomeAnunciante = anuncioOriginal.autor_nome || 'Não informado';
+const telefoneAnunciante = anuncioOriginal.autor_telefone || '';
+const linkWhatsAppAnunciante = `https://wa.me/${telefoneAnunciante}?text=${encodeURIComponent(`Olá ${nomeAnunciante}, sobre seu anúncio no grupo ${anuncioOriginal.grupo_nome}...`)}`;
+
+const htmlString = `
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel de Oportunidades</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; background-color: #f4f7f6; color: #333; }
+    .container { max-width: 1200px; margin: 20px auto; padding: 20px; background-color: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .main-title { font-size: 28px; color: #1a1a1a; text-align: center; margin-bottom: 20px; }
+    .card { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 20px; overflow: hidden; }
+    .card-subtitle { padding: 8px 15px; background-color: #f8f8f8; color: #555; font-size: 14px; border-bottom: 1px solid #ddd; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; }
+    .card-content { display: flex; flex-wrap: wrap; padding: 15px; }
+    .column { padding: 10px; box-sizing: border-box; }
+    .column-text { flex: 60%; white-space: pre-wrap; font-family: monospace; background-color: #f0f0f0; border-radius: 4px; padding: 15px; }
+    .column-details { flex: 40%; padding-left: 20px; }
+    .column-details ul { margin: 0; padding: 0; list-style-type: none; }
+    .column-details li { margin-bottom: 8px; font-size: 15px; }
+    h1 { color: #1a1a1a; font-size: 24px; margin-top: 20px; border-bottom: 2px solid #e1e1e1; padding-bottom: 10px; }
+    .action-button { display: inline-block; padding: 8px 16px; color: white !important; text-decoration: none; border-radius: 20px; font-weight: bold; font-size: 14px; transition: background-color 0.2s; cursor: pointer; border: none; margin: 4px; }
+    .btn-contatar { background-color: #128C7E; } .btn-contatar:hover { background-color: #25D366; }
+    .btn-marcar { background-color: #007bff; } .btn-marcar:hover { background-color: #0056b3; }
+    .lead-header { display: flex; align-items: center; padding: 10px 15px; cursor: pointer; background-color: #cddff8; border-top: 1px solid #ddd; }
+    .lead-header:hover { background-color: #b4c9e8; }
+    .lead-header > div { padding: 0 10px; }
+    .score-col { flex: 0 0 80px; text-align: center; font-weight: bold; font-size: 1.2em; }
+    .score-high { color: #28a745; } .score-mid { color: #ffc107; } .score-low { color: #6c757d; }
+    .type-col { flex: 0 0 130px; }
+    .name-col { flex: 1 1 auto; font-weight: 500; }
+    .phone-col { flex: 0 0 150px; color: #555; }
+    .action-col { flex: 0 0 50px; text-align: right; font-size: 24px; user-select: none; transition: transform 0.2s; }
+    .lead-type { font-size: 0.9em; padding: 4px 8px; border-radius: 12px; color: white; text-align: center; display: inline-block; }
+    .type-direto { background-color: #17a2b8; } .type-parceiro { background-color: #6c757d; }
+    .lead-details { display: none; }
+    .details-actions { text-align: right; width: 100%; border-top: 1px solid #eee; padding-top: 15px; margin-top: 15px; }
+    .rotated { transform: rotate(180deg); }
+    @media screen and (max-width: 768px) {
+      .container { padding: 10px; margin: 0; width: 100%; box-sizing: border-box; box-shadow: none; border-radius: 0; }
+      .card-subtitle { flex-direction: column; align-items: flex-start; }
+      .card-subtitle a { margin-top: 10px; width: 100%; text-align: center; box-sizing: border-box; }
+      .card-content { flex-direction: column; }
+      .column-details { padding-left: 10px; padding-top: 20px; }
+      .lead-header { flex-wrap: wrap; }
+      .name-col { width: 100%; flex-basis: 100%; order: 1; padding: 10px 0 5px 0; font-size: 1.1em; }
+      .score-col { flex: 1 1 50%; order: 2; text-align: left; padding-left: 0; }
+      .type-col { flex: 1 1 50%; order: 3; text-align: right; padding-right: 0; }
+      .phone-col { display: none; }
+      .action-col { order: 4; }
+      .details-actions { text-align: center; margin-top: 10px; }
+      .action-button { width: 100%; box-sizing: border-box; text-align: center; margin-bottom: 5px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="main-title">${tituloPrincipal}</h1>
+    <div class="card">
+      <div class="card-subtitle">
+        <div>
+          <span><strong>Grupo:</strong> ${anuncioOriginal.grupo_nome || 'Não informado'} | <strong>Data:</strong> ${formatarData(anuncioOriginal.mensagem_datetime)}</span><br>
+          <span><strong>Anunciante:</strong> ${nomeAnunciante} - ${telefoneAnunciante}</span>
+        </div>
+        <a href="${linkWhatsAppAnunciante}" target="_blank" class="action-button btn-contatar">Contatar Anunciante</a>
+      </div>
+      <div class="card-content">
+        <div class="column column-text"><strong>Anúncio Original:</strong><br><br>${anuncioOriginal.mensagem_conteudo || ''}</div>
+        <div class="column column-details">${gerarListaDetalhes(anuncioOriginal, anuncioOriginal.intencao)}</div>
+      </div>
+    </div>
+    <h1>${tituloContador}</h1>
+    <div class="leads-list">
+    ${allLeads.map((lead, index) => {
+        const score = lead.pontuacao_match ?? 0;
+        let scoreClass = 'score-low';
+        if (score >= 40) scoreClass = 'score-high';
+        else if (score >= 25) scoreClass = 'score-mid';
+
+        const nomeLead = lead.nome || lead.autor_nome || 'Não informado';
+        const telefoneLead = lead.telefone || lead.autor_telefone;
+        const tipoLead = lead.tipo;
+        const tipoClass = tipoLead === 'Cliente Direto' ? 'type-direto' : 'type-parceiro';
+        
+        // CORREÇÃO: O título do anúncio para o link do WhatsApp é gerado aqui dentro.
+        const anuncioTituloLead = `${anuncioOriginal.tipo_imovel || ''} ${anuncioOriginal.quartos || ''}qts em ${anuncioOriginal.bairro || 'local'}`;
+        const textoPadrao = encodeURIComponent(`Olá ${nomeLead}! Sobre a sua procura, encontrei uma oportunidade (${anuncioTituloLead}) que pode te interessar. Podemos conversar?`);
+        const linkWhatsAppLead = `https://wa.me/${telefoneLead}?text=${textoPadrao}`;
+
+        return `
+          <div class="lead-card">
+            <div class="lead-header" onclick="toggleDetails(${index})">
+              <div class="score-col score ${scoreClass}">${score} ⭐</div>
+              <div class="type-col"><span class="lead-type ${tipoClass}">${tipoLead}</span></div>
+              <div class="name-col">${nomeLead}</div>
+              <div class="phone-col">${telefoneLead}</div>
+              <div class="action-col" id="arrow-${index}">▼</div>
+            </div>
+            <div class="lead-details" id="details-${index}">
+                <div class="card-subtitle">
+                    <strong>Grupo:</strong> ${lead.grupo_nome || 'Não informado'} | <strong>Data:</strong> ${formatarData(lead.mensagem_datetime)}
+                </div>
+                <div class="card-content">
+                    <div class="column column-text">
+                        <strong>${isOfertaOriginal ? 'Procura Original' : 'Oferta Original'}:</strong><br><br>
+                        ${lead.mensagem_conteudo || lead.descricao || ''}
+                    </div>
+                    <div class="column column-details">
+                        ${gerarListaDetalhes(lead, isOfertaOriginal ? 'procura' : 'oferta')}
+                    </div>
+                </div>
+                <div class="details-actions">
+                  <a href="${linkWhatsAppLead}" target="_blank" class="action-button btn-contatar">Contatar Lead</a>
+                  <button class="action-button btn-marcar" onclick="alert('Funcionalidade futura: Marcar como contatado')">Marcar Contato</button>
+                </div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  </div>
+  <script>
+    function toggleDetails(index) {
+      const detailsRow = document.getElementById('details-' + index);
+      const arrow = document.getElementById('arrow-' + index);
+      if (detailsRow.style.display === 'block') {
+        detailsRow.style.display = 'none';
+        arrow.style.transform = 'rotate(0deg)';
+      } else {
+        detailsRow.style.display = 'block';
+        arrow.style.transform = 'rotate(180deg)';
+      }
+    }
+  </script>
+</body>
+</html>
+`;
+
+// --- ETAPA 4: PREPARAR A SAÍDA COMO ARQUIVO BINÁRIO ---
+const buffer = Buffer.from(htmlString, 'utf8');
+const binaryData = await this.helpers.prepareBinaryData(buffer, 'report.html', 'text/html');
+
+// --- ETAPA 5: RETORNO FINAL ---
+return [{
+  json: {},
+  binary: {
+    data: binaryData
+  }
+}];
