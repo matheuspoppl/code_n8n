@@ -1,9 +1,10 @@
 /*
  * =================================================================================
- * == Gerador de Página de Leads v4.2 (Final Corrigido) ==
+ * == Gerador de Página de Leads v4.2 (Final Universal) ==
  * =================================================================================
- * v4.2: Corrige o erro "anuncioTitulo is not defined" ao gerar o título do anúncio
- * diretamente no escopo correto, garantindo compatibilidade com o ambiente n8n.
+ * Este script gera um painel de ação completo, responsivo e interativo.
+ * v4.2: Torna o script universal, capaz de processar tanto a estrutura de dados
+ * do fluxo "Oferta -> Clientes" quanto do fluxo "Procura -> Ofertas".
  * =================================================================================
  */
 
@@ -24,15 +25,23 @@ if (!input || !Array.isArray(input.oportunidades)) {
 
 const anuncioOriginal = input;
 const todasAsOportunidades = input.oportunidades;
-const allLeads = [];
+let allLeads = [];
 
-for (const item of todasAsOportunidades) {
-  if (item.clientes_diretos) {
-    allLeads.push({ ...item.clientes_diretos, tipo: 'Cliente Direto' });
-  } else if (item.clientes_parceiros) {
-    allLeads.push({ ...item.clientes_parceiros, tipo: 'Parceiro' });
+// LÓGICA DE UNIFICAÇÃO UNIVERSAL:
+// Verifica se o primeiro item tem a estrutura aninhada (clientes_diretos/parceiros).
+if (todasAsOportunidades.length > 0 && (todasAsOportunidades[0].clientes_diretos || todasAsOportunidades[0].clientes_parceiros)) {
+  for (const item of todasAsOportunidades) {
+    if (item.clientes_diretos) {
+      allLeads.push({ ...item.clientes_diretos, tipo: 'Cliente Direto' });
+    } else if (item.clientes_parceiros) {
+      allLeads.push({ ...item.clientes_parceiros, tipo: 'Parceiro' });
+    }
   }
+} else {
+  // Se não, assume que é uma lista simples de ofertas.
+  allLeads = todasAsOportunidades.map(item => ({ ...item, tipo: 'Imóvel Ofertado' }));
 }
+
 
 if (allLeads.length === 0) {
   return returnErrorHtml("Nenhum lead compatível foi encontrado para este anúncio.");
@@ -58,7 +67,6 @@ const formatarData = (dataISO) => {
 const gerarListaDetalhes = (dados, tipoDados) => {
     const isOferta = tipoDados === 'oferta';
     const titulo = isOferta ? 'Dados da Oferta:' : 'Dados da Procura:';
-
     const detalhes = [
         { label: 'Tipo de Imóvel', value: dados.tipo_imovel },
         { label: 'Operação', value: dados.tipo_operacao },
@@ -75,12 +83,7 @@ const gerarListaDetalhes = (dados, tipoDados) => {
         { label: 'Condomínio', value: dados.condominio ? `R$ ${parseInt(dados.condominio).toLocaleString('pt-BR')}` : null },
         { label: 'IPTU', value: dados.iptu ? `R$ ${parseInt(dados.iptu).toLocaleString('pt-BR')}` : null },
     ];
-
-    const listaHtml = detalhes
-        .filter(item => item.value)
-        .map(item => `<li><strong>${item.label}:</strong> ${item.value}</li>`)
-        .join('');
-
+    const listaHtml = detalhes.filter(item => item.value).map(item => `<li><strong>${item.label}:</strong> ${item.value}</li>`).join('');
     return listaHtml ? `<strong>${titulo}</strong><ul>${listaHtml}</ul>` : '';
 };
 
@@ -129,7 +132,7 @@ const htmlString = `
     .phone-col { flex: 0 0 150px; color: #555; }
     .action-col { flex: 0 0 50px; text-align: right; font-size: 24px; user-select: none; transition: transform 0.2s; }
     .lead-type { font-size: 0.9em; padding: 4px 8px; border-radius: 12px; color: white; text-align: center; display: inline-block; }
-    .type-direto { background-color: #17a2b8; } .type-parceiro { background-color: #6c757d; }
+    .type-direto { background-color: #17a2b8; } .type-parceiro { background-color: #6c757d; } .type-imovel { background-color: #fd7e14; }
     .lead-details { display: none; }
     .details-actions { text-align: right; width: 100%; border-top: 1px solid #eee; padding-top: 15px; margin-top: 15px; }
     .rotated { transform: rotate(180deg); }
@@ -177,11 +180,10 @@ const htmlString = `
         const nomeLead = lead.nome || lead.autor_nome || 'Não informado';
         const telefoneLead = lead.telefone || lead.autor_telefone;
         const tipoLead = lead.tipo;
-        const tipoClass = tipoLead === 'Cliente Direto' ? 'type-direto' : 'type-parceiro';
+        const tipoClass = tipoLead === 'Cliente Direto' ? 'type-direto' : (tipoLead === 'Parceiro' ? 'type-parceiro' : 'type-imovel');
         
-        // CORREÇÃO: O título do anúncio para o link do WhatsApp é gerado aqui dentro.
         const anuncioTituloLead = `${anuncioOriginal.tipo_imovel || ''} ${anuncioOriginal.quartos || ''}qts em ${anuncioOriginal.bairro || 'local'}`;
-        const textoPadrao = encodeURIComponent(`Olá ${nomeLead}! Sobre a sua procura, encontrei uma oportunidade (${anuncioTituloLead}) que pode te interessar. Podemos conversar?`);
+        const textoPadrao = encodeURIComponent(`Olá ${nomeLead}! Vi que você tem um imóvel que pode interessar a um cliente meu (${anuncioTituloLead}). Podemos conversar sobre parceria?`);
         const linkWhatsAppLead = `https://wa.me/${telefoneLead}?text=${textoPadrao}`;
 
         return `
@@ -204,11 +206,11 @@ const htmlString = `
                     </div>
                     <div class="column column-details">
                         ${gerarListaDetalhes(lead, isOfertaOriginal ? 'procura' : 'oferta')}
+                        <div class="details-actions">
+                          <a href="${linkWhatsAppLead}" target="_blank" class="action-button btn-contatar">Contatar Lead</a>
+                          <button class="action-button btn-marcar" onclick="alert('Funcionalidade futura: Marcar como contatado')">Marcar Contato</button>
+                        </div>
                     </div>
-                </div>
-                <div class="details-actions">
-                  <a href="${linkWhatsAppLead}" target="_blank" class="action-button btn-contatar">Contatar Lead</a>
-                  <button class="action-button btn-marcar" onclick="alert('Funcionalidade futura: Marcar como contatado')">Marcar Contato</button>
                 </div>
             </div>
           </div>
