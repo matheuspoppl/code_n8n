@@ -1,10 +1,10 @@
 /*
  * =================================================================================
- * == Gerador de Página de Leads v4.2 (Final Universal) ==
+ * == Gerador de Página de Leads v5.1 (Responsividade Corrigida) ==
  * =================================================================================
- * v4.2: Torna o script "bilíngue", capaz de processar as diferentes estruturas
- * de dados dos fluxos "Clientes Diretos" e "Parceiros", exibindo
- * todas as informações corretamente.
+ * Este script gera um painel de ação completo, responsivo e interativo.
+ * v5.1: Corrige a lógica de CSS responsivo para garantir que todos os
+ * elementos sejam exibidos corretamente em telas de celular.
  * =================================================================================
  */
 
@@ -16,7 +16,6 @@ const returnErrorHtml = async (message) => {
   const errorHtml = `<html><body><h1>${message}</h1></body></html>`;
   const buffer = Buffer.from(errorHtml, 'utf8');
   const binaryData = await this.helpers.prepareBinaryData(buffer, 'error.html', 'text/html');
-  // Retorna no formato de array esperado pelo n8n
   return [{ json: {}, binary: { data: binaryData } }];
 };
 
@@ -28,30 +27,43 @@ const anuncioOriginal = input;
 const todasAsOportunidades = input.oportunidades;
 let allLeads = [];
 
-// LÓGICA DE UNIFICAÇÃO UNIVERSAL:
+// Unifica os resultados e adiciona um campo de data padronizado para ordenação
 if (todasAsOportunidades.length > 0 && (todasAsOportunidades[0].clientes_diretos || todasAsOportunidades[0].clientes_parceiros)) {
   for (const item of todasAsOportunidades) {
     if (item.clientes_diretos) {
-      allLeads.push({ ...item.clientes_diretos, tipo: 'Cliente Direto' });
+      allLeads.push({ ...item.clientes_diretos, tipo: 'Cliente Direto', data_lead: item.clientes_diretos.data_ultima_mensagem });
     } else if (item.clientes_parceiros) {
-      allLeads.push({ ...item.clientes_parceiros, tipo: 'Parceiro' });
+      allLeads.push({ ...item.clientes_parceiros, tipo: 'Parceiro', data_lead: item.clientes_parceiros.mensagem_datetime });
     }
   }
 } else {
-  allLeads = todasAsOportunidades.map(item => ({ ...item, tipo: 'Imóvel Ofertado' }));
+  allLeads = todasAsOportunidades.map(item => ({ ...item, tipo: 'Imóvel Ofertado', data_lead: item.mensagem_datetime }));
 }
-
 
 if (allLeads.length === 0) {
   return returnErrorHtml("Nenhum lead compatível foi encontrado para este anúncio.");
 }
 
-// --- ETAPA 2: ORDENAR POR RELEVÂNCIA ---
+// --- ETAPA 2: ORDENAR POR RELEVÂNCIA (LÓGICA DUPLA) ---
+
+const isOfertaOriginal = anuncioOriginal.intencao === 'oferta';
 
 allLeads.sort((a, b) => {
+  const dateA = a.data_lead ? new Date(a.data_lead) : new Date(0);
+  const dateB = b.data_lead ? new Date(b.data_lead) : new Date(0);
   const scoreA = a.pontuacao_match ?? -1;
   const scoreB = b.pontuacao_match ?? -1;
-  return scoreB - scoreA;
+
+  if (isOfertaOriginal) { // Se estamos buscando CLIENTES
+    const typeA = a.tipo === 'Cliente Direto' ? 1 : 0;
+    const typeB = b.tipo === 'Cliente Direto' ? 1 : 0;
+    if (typeA !== typeB) return typeB - typeA;
+    if (dateB.getTime() !== dateA.getTime()) return dateB - dateA;
+    return scoreB - scoreA;
+  } else { // Se estamos buscando IMÓVEIS
+    if (dateB.getTime() !== dateA.getTime()) return dateB - dateA;
+    return scoreB - scoreA;
+  }
 });
 
 // --- ETAPA 3: GERAR A PÁGINA HTML ---
@@ -59,20 +71,14 @@ allLeads.sort((a, b) => {
 const formatarData = (dataISO) => {
   if (!dataISO) return 'Não informada';
   const data = new Date(dataISO);
-  data.setHours(data.getHours() - 3);
+  data.setHours(data.getHours() - 3); // Ajuste UTC-3
   return data.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
-// CORREÇÃO: Função agora lida com as duas estruturas de dados (clientes diretos e parceiros)
 const gerarListaDetalhes = (dados, tipoDados) => {
     const isOferta = tipoDados === 'oferta';
     const titulo = isOferta ? 'Dados da Oferta:' : 'Dados da Procura:';
-    
-    // Unifica o valor/orçamento para facilitar a exibição
-    let valorLead = dados.valor;
-    if (!valorLead) {
-        valorLead = dados.investmax_compra || dados.investmax_aluguel;
-    }
+    let valorLead = dados.valor || dados.investmax_compra || dados.investmax_aluguel;
 
     const detalhes = [
         { label: 'Tipo de Imóvel', value: dados.tipo_imovel || dados.tipoimovel },
@@ -90,11 +96,10 @@ const gerarListaDetalhes = (dados, tipoDados) => {
         { label: 'Condomínio', value: dados.condominio ? `R$ ${parseInt(dados.condominio).toLocaleString('pt-BR')}` : null },
         { label: 'IPTU', value: dados.iptu ? `R$ ${parseInt(dados.iptu).toLocaleString('pt-BR')}` : null },
     ];
-    const listaHtml = detalhes.filter(item => item.value !== null && item.value !== undefined).map(item => `<li><strong>${item.label}:</strong> ${item.value}</li>`).join('');
+    const listaHtml = detalhes.filter(item => item.value !== null && item.value !== undefined && item.value !== '').map(item => `<li><strong>${item.label}:</strong> ${item.value}</li>`).join('');
     return listaHtml ? `<strong>${titulo}</strong><ul>${listaHtml}</ul>` : '';
 };
 
-const isOfertaOriginal = anuncioOriginal.intencao === 'oferta';
 const tituloPrincipal = isOfertaOriginal 
     ? "Oportunidade: Imóvel Oferecido e Potenciais Clientes Encontrados"
     : "Oportunidade: Cliente Procurando e Potenciais Imóveis Encontrados";
@@ -119,6 +124,7 @@ const htmlString = `
     .main-title { font-size: 28px; color: #1a1a1a; text-align: center; margin-bottom: 20px; }
     .card { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 20px; overflow: hidden; }
     .card-subtitle { padding: 8px 15px; background-color: #f8f8f8; color: #555; font-size: 14px; border-bottom: 1px solid #ddd; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; }
+    .card-subtitle-info { display: flex; flex-direction: column; }
     .card-content { display: flex; flex-wrap: wrap; padding: 15px; }
     .column { padding: 10px; box-sizing: border-box; }
     .column-text { flex: 60%; white-space: pre-wrap; font-family: monospace; background-color: #f0f0f0; border-radius: 4px; padding: 15px; }
@@ -136,26 +142,28 @@ const htmlString = `
     .score-high { color: #28a745; } .score-mid { color: #ffc107; } .score-low { color: #6c757d; }
     .type-col { flex: 0 0 130px; }
     .name-col { flex: 1 1 auto; font-weight: 500; }
-    .phone-col { flex: 0 0 150px; color: #555; }
+    .date-col { flex: 0 0 150px; color: #555; text-align: right; font-weight: bold; }
     .action-col { flex: 0 0 50px; text-align: right; font-size: 24px; user-select: none; transition: transform 0.2s; }
     .lead-type { font-size: 0.9em; padding: 4px 8px; border-radius: 12px; color: white; text-align: center; display: inline-block; }
     .type-direto { background-color: #17a2b8; } .type-parceiro { background-color: #6c757d; } .type-imovel { background-color: #fd7e14; }
     .lead-details { display: none; }
-    .details-actions { text-align: right; width: 100%; border-top: 1px solid #eee; padding-top: 15px; margin-top: 15px; }
+    .details-footer { text-align: right; width: 100%; border-top: 1px solid #eee; padding: 10px 15px; background-color: #f8f8f8; box-sizing: border-box; }
     .rotated { transform: rotate(180deg); }
+    
     @media screen and (max-width: 768px) {
       .container { padding: 10px; margin: 0; width: 100%; box-sizing: border-box; box-shadow: none; border-radius: 0; }
-      .card-subtitle { flex-direction: column; align-items: flex-start; }
-      .card-subtitle a { margin-top: 10px; width: 100%; text-align: center; box-sizing: border-box; }
+      .card-subtitle { flex-direction: column; align-items: flex-start; gap: 5px; }
+      .card-subtitle-info { order: 1; }
+      .card-subtitle .action-button { order: 2; margin-top: 10px; width: 100%; text-align: center; box-sizing: border-box; }
       .card-content { flex-direction: column; }
       .column-details { padding-left: 10px; padding-top: 20px; }
-      .lead-header { flex-wrap: wrap; }
-      .name-col { width: 100%; flex-basis: 100%; order: 1; padding: 10px 0 5px 0; font-size: 1.1em; }
+      .lead-header { flex-wrap: wrap; row-gap: 5px; }
+      .name-col { width: 100%; flex-basis: 100%; order: 1; padding: 5px 0; font-size: 1.1em; }
       .score-col { flex: 1 1 50%; order: 2; text-align: left; padding-left: 0; }
       .type-col { flex: 1 1 50%; order: 3; text-align: right; padding-right: 0; }
-      .phone-col { display: none; }
-      .action-col { order: 4; }
-      .details-actions { text-align: center; margin-top: 10px; }
+      .date-col { flex: 1 1 90%; order: 5; text-align: left; padding-left: 0; } /* A Data agora aparece */
+      .action-col { flex: 1 1 10%; order: 4; }
+      .details-footer { text-align: center; }
       .action-button { width: 100%; box-sizing: border-box; text-align: center; margin-bottom: 5px; }
     }
   </style>
@@ -165,8 +173,8 @@ const htmlString = `
     <h1 class="main-title">${tituloPrincipal}</h1>
     <div class="card">
       <div class="card-subtitle">
-        <div>
-          <span><strong>Grupo:</strong> ${anuncioOriginal.grupo_nome || 'Não informado'} | <strong>Data:</strong> ${formatarData(anuncioOriginal.mensagem_datetime)}</span><br>
+        <div class="card-subtitle-info">
+          <span><strong>Grupo:</strong> ${anuncioOriginal.grupo_nome || 'Não informado'} | <strong>Data:</strong> ${formatarData(anuncioOriginal.mensagem_datetime)}</span>
           <span><strong>Anunciante:</strong> ${nomeAnunciante} - ${telefoneAnunciante}</span>
         </div>
         <a href="${linkWhatsAppAnunciante}" target="_blank" class="action-button btn-contatar">Contatar Anunciante</a>
@@ -199,12 +207,12 @@ const htmlString = `
               <div class="score-col score ${scoreClass}">${score} ⭐</div>
               <div class="type-col"><span class="lead-type ${tipoClass}">${tipoLead}</span></div>
               <div class="name-col">${nomeLead}</div>
-              <div class="phone-col">${telefoneLead}</div>
+              <div class="date-col">${formatarData(lead.data_lead)}</div>
               <div class="action-col" id="arrow-${index}">▼</div>
             </div>
             <div class="lead-details" id="details-${index}">
                 <div class="card-subtitle">
-                    <strong>Grupo:</strong> ${lead.grupo_nome || 'Não informado'} | <strong>Data:</strong> ${formatarData(lead.mensagem_datetime || lead.data_ultima_mensagem)}
+                    <strong>Grupo:</strong> ${lead.grupo_nome || 'Não informado'} | <strong>Data:</strong> ${formatarData(lead.data_lead)}
                 </div>
                 <div class="card-content">
                     <div class="column column-text">
@@ -213,11 +221,11 @@ const htmlString = `
                     </div>
                     <div class="column column-details">
                         ${gerarListaDetalhes(lead, isOfertaOriginal ? 'procura' : 'oferta')}
-                        <div class="details-actions">
-                          <a href="${linkWhatsAppLead}" target="_blank" class="action-button btn-contatar">Contatar Lead</a>
-                          <button class="action-button btn-marcar" onclick="alert('Funcionalidade futura: Marcar como contatado')">Marcar Contato</button>
-                        </div>
                     </div>
+                </div>
+                <div class="details-footer">
+                  <a href="${linkWhatsAppLead}" target="_blank" class="action-button btn-contatar">Contatar Lead (${telefoneLead})</a>
+                  <button class="action-button btn-marcar" onclick="alert('Funcionalidade futura: Marcar como contatado')">Marcar Contato</button>
                 </div>
             </div>
           </div>
