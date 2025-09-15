@@ -2,9 +2,9 @@
  * =================================================================================
  * == Gerador de Página de Leads v4.2 (Final Universal) ==
  * =================================================================================
- * Este script gera um painel de ação completo, responsivo e interativo.
- * v4.2: Torna o script universal, capaz de processar tanto a estrutura de dados
- * do fluxo "Oferta -> Clientes" quanto do fluxo "Procura -> Ofertas".
+ * v4.2: Torna o script "bilíngue", capaz de processar as diferentes estruturas
+ * de dados dos fluxos "Clientes Diretos" e "Parceiros", exibindo
+ * todas as informações corretamente.
  * =================================================================================
  */
 
@@ -16,6 +16,7 @@ const returnErrorHtml = async (message) => {
   const errorHtml = `<html><body><h1>${message}</h1></body></html>`;
   const buffer = Buffer.from(errorHtml, 'utf8');
   const binaryData = await this.helpers.prepareBinaryData(buffer, 'error.html', 'text/html');
+  // Retorna no formato de array esperado pelo n8n
   return [{ json: {}, binary: { data: binaryData } }];
 };
 
@@ -28,7 +29,6 @@ const todasAsOportunidades = input.oportunidades;
 let allLeads = [];
 
 // LÓGICA DE UNIFICAÇÃO UNIVERSAL:
-// Verifica se o primeiro item tem a estrutura aninhada (clientes_diretos/parceiros).
 if (todasAsOportunidades.length > 0 && (todasAsOportunidades[0].clientes_diretos || todasAsOportunidades[0].clientes_parceiros)) {
   for (const item of todasAsOportunidades) {
     if (item.clientes_diretos) {
@@ -38,7 +38,6 @@ if (todasAsOportunidades.length > 0 && (todasAsOportunidades[0].clientes_diretos
     }
   }
 } else {
-  // Se não, assume que é uma lista simples de ofertas.
   allLeads = todasAsOportunidades.map(item => ({ ...item, tipo: 'Imóvel Ofertado' }));
 }
 
@@ -64,12 +63,20 @@ const formatarData = (dataISO) => {
   return data.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+// CORREÇÃO: Função agora lida com as duas estruturas de dados (clientes diretos e parceiros)
 const gerarListaDetalhes = (dados, tipoDados) => {
     const isOferta = tipoDados === 'oferta';
     const titulo = isOferta ? 'Dados da Oferta:' : 'Dados da Procura:';
+    
+    // Unifica o valor/orçamento para facilitar a exibição
+    let valorLead = dados.valor;
+    if (!valorLead) {
+        valorLead = dados.investmax_compra || dados.investmax_aluguel;
+    }
+
     const detalhes = [
-        { label: 'Tipo de Imóvel', value: dados.tipo_imovel },
-        { label: 'Operação', value: dados.tipo_operacao },
+        { label: 'Tipo de Imóvel', value: dados.tipo_imovel || dados.tipoimovel },
+        { label: 'Operação', value: dados.tipo_operacao || dados.finalidade },
         { label: 'Bairro', value: dados.bairro || dados.localizacao?.bairro },
         { label: 'Região', value: dados.localizacao?.regiao },
         { label: 'Condomínio', value: dados.localizacao?.condominio },
@@ -79,11 +86,11 @@ const gerarListaDetalhes = (dados, tipoDados) => {
         { label: 'Banheiros', value: dados.banheiros },
         { label: 'Vagas', value: dados.vagas_garagem },
         { label: 'Área (m²)', value: dados.area_m2 },
-        { label: isOferta ? 'Valor' : 'Orçamento', value: dados.valor ? `R$ ${parseInt(dados.valor).toLocaleString('pt-BR')}` : null },
+        { label: isOferta ? 'Valor' : 'Orçamento', value: valorLead ? `R$ ${parseInt(valorLead).toLocaleString('pt-BR')}` : null },
         { label: 'Condomínio', value: dados.condominio ? `R$ ${parseInt(dados.condominio).toLocaleString('pt-BR')}` : null },
         { label: 'IPTU', value: dados.iptu ? `R$ ${parseInt(dados.iptu).toLocaleString('pt-BR')}` : null },
     ];
-    const listaHtml = detalhes.filter(item => item.value).map(item => `<li><strong>${item.label}:</strong> ${item.value}</li>`).join('');
+    const listaHtml = detalhes.filter(item => item.value !== null && item.value !== undefined).map(item => `<li><strong>${item.label}:</strong> ${item.value}</li>`).join('');
     return listaHtml ? `<strong>${titulo}</strong><ul>${listaHtml}</ul>` : '';
 };
 
@@ -183,7 +190,7 @@ const htmlString = `
         const tipoClass = tipoLead === 'Cliente Direto' ? 'type-direto' : (tipoLead === 'Parceiro' ? 'type-parceiro' : 'type-imovel');
         
         const anuncioTituloLead = `${anuncioOriginal.tipo_imovel || ''} ${anuncioOriginal.quartos || ''}qts em ${anuncioOriginal.bairro || 'local'}`;
-        const textoPadrao = encodeURIComponent(`Olá ${nomeLead}! Vi que você tem um imóvel que pode interessar a um cliente meu (${anuncioTituloLead}). Podemos conversar sobre parceria?`);
+        const textoPadrao = encodeURIComponent(isOfertaOriginal ? `Olá ${nomeLead}! Sobre a sua procura, encontrei uma oportunidade (${anuncioTituloLead}) que pode te interessar. Podemos conversar?` : `Olá ${nomeLead}! Vi que você tem um imóvel que pode interessar a um cliente meu (${anuncioTituloLead}). Podemos conversar sobre parceria?`);
         const linkWhatsAppLead = `https://wa.me/${telefoneLead}?text=${textoPadrao}`;
 
         return `
@@ -197,7 +204,7 @@ const htmlString = `
             </div>
             <div class="lead-details" id="details-${index}">
                 <div class="card-subtitle">
-                    <strong>Grupo:</strong> ${lead.grupo_nome || 'Não informado'} | <strong>Data:</strong> ${formatarData(lead.mensagem_datetime)}
+                    <strong>Grupo:</strong> ${lead.grupo_nome || 'Não informado'} | <strong>Data:</strong> ${formatarData(lead.mensagem_datetime || lead.data_ultima_mensagem)}
                 </div>
                 <div class="card-content">
                     <div class="column column-text">
