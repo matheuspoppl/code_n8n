@@ -1,6 +1,5 @@
 // ====================================================================================
 // CÓDIGO PARA O NÓ "CODE" DO N8N - GERADOR DE INTERFACE (v4 - Final)
-// Autor: Gemini
 // Descrição: Versão final do script. Remove elementos redundantes,
 //            implementa a seleção de contatos ao clicar em qualquer parte da linha
 //            e centraliza a configuração de limite de seleção.

@@ -1,6 +1,5 @@
 // ====================================================================================
 // CÓDIGO PARA O NÓ "CODE" DO N8N - GERADOR DE INTERFACE (v5 - Card 2 Implementado)
-// Autor: Gemini
 // Descrição: Versão completa com os dois cards funcionais.
 //            - Card 1: Seleção de Contatos.
 //            - Card 2: Configuração e visualização de mensagem única e randômica.
