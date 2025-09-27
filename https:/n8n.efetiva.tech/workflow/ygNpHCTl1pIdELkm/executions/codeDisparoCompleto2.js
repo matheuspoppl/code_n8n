@@ -1,7 +1,8 @@
 // ====================================================================================
-// CÓDIGO PARA O NÓ "CODE" DO N8N - GERADOR DE INTERFACE (v14 - Versão Final de Produção)
-// Descrição: Versão final e completa da aplicação, com webhook de disparo integrado,
-//            novo design no Card 3 e tabela de resumo otimizada para mobile com Flexbox.
+// CÓDIGO PARA O NÓ "CODE" DO N8N - GERADOR DE INTERFACE (v16 - Paginação Implementada)
+// Autor: Gemini
+// Descrição: Versão final da aplicação com a lógica de paginação implementada no Card 1
+//            para otimizar a performance com grandes volumes de dados.
 // ====================================================================================
 
 const contacts = $input.all().map(item => item.json);
@@ -50,6 +51,8 @@ const html = `
         input[type="checkbox"] { transform: scale(1.5); cursor: pointer; accent-color: var(--accent-color); }
         
         /* --- ESTILOS CARD 1 --- */
+        /* --- Adicione esta nova regra --- */
+        .contacts-table-container {min-width: 0;}
         #card1_wrapper .table-scroll-wrapper { border: 1px solid var(--border-color); border-top: none; border-radius: 0 0 6px 6px; overflow: auto; max-height: 60vh; }
         #card1_wrapper table { width: 100%; border-collapse: collapse; }
         #card1_wrapper th, #card1_wrapper td { padding: 0.8rem; text-align: left; border-bottom: 1px solid var(--border-color); white-space: nowrap; vertical-align: middle; }
@@ -59,6 +62,7 @@ const html = `
         #searchInput { width: 100%; padding: 0.75rem; margin-bottom: 1rem; background-color: var(--header-bg-color); border: 1px solid var(--border-color); border-radius: 5px; color: var(--text-color); font-size: 1rem; box-sizing: border-box; }
         .action-btn { background-color: var(--primary-color); color: white; border: none; border-radius: 5px; padding: 0.4rem 0.6rem; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
         .action-btn svg { width: 16px; height: 16px; }
+        #pagination-controls { display: flex; justify-content: center; align-items: center; padding-top: 1rem; gap: 1rem; user-select: none; }
 
         /* --- ESTILOS CARD 2 --- */
         .config-section { margin-bottom: 1.5rem; }
@@ -71,7 +75,7 @@ const html = `
         .preview-col { display: flex; flex-direction: column; }
         .phone-preview { background-color: var(--bg-color); border-radius: 12px; padding: 1rem; border: 3px solid #555; display: flex; flex-direction: column; flex-grow: 1; }
         #testNameInput { background-color: var(--header-bg-color); border: 1px solid var(--border-color); color: var(--text-color); padding: 0.5rem; border-radius: 4px; }
-        .chat-bubble { background-color: var(--primary-color); color: white; padding: 0.75rem 1rem; margin-bottom: 1.5em; border-radius: 15px 15px 0 15px; align-self: flex-end; max-width: 95%; width: fit-content; word-wrap: break-word; line-height: 1.4; min-height: 30px; margin-top: 1.5rem; }
+        .chat-bubble { background-color: var(--primary-color); color: white; padding: 0.75rem 1rem; border-radius: 15px 15px 0 15px; align-self: flex-end; max-width: 95%; width: fit-content; word-wrap: break-word; line-height: 1.4; min-height: 30px; margin-top: 1.5rem; margin-bottom: 1.5rem; }
         .preview-spacer { flex-grow: 1; }
         #generatePreviewBtn { background-color: var(--accent-color); } #generatePreviewBtn:hover { opacity: 0.9; }
 
@@ -84,11 +88,11 @@ const html = `
         .summary-row { display: flex; flex-wrap: wrap; padding: 0.75rem; border-radius: 6px; }
         .summary-row:nth-child(odd) { background-color: var(--row-blue-odd); }
         .summary-row:nth-child(even) { background-color: var(--row-blue-even); }
-        .contact-info { display: flex; align-items: center; margin-bottom: 1.5rem; gap: 1rem; flex: 1 1 300px; }
+        .contact-info { display: flex; align-items: center; gap: 1rem; flex: 1 1 300px; padding-bottom: 0.5rem; }
         .contact-message { display: flex; align-items: flex-start; gap: 1rem; flex: 2 1 400px; }
         .contact-info span { font-weight: bold; }
         .contact-info .count { flex-basis: 25px; }
-        .message-content { flex-grow: 1; line-height: 1.5; }
+        .message-content { flex-grow: 1; line-height: 1.5; white-space: pre-wrap; }
         
         /* --- ESTILOS MODAL --- */
         .modal-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; z-index: 1000; }
@@ -143,7 +147,6 @@ const html = `
 
             function invalidateSummary() {
                 if (!summaryIsValid) return;
-                const summaryWrapper = document.getElementById('card3_wrapper');
                 document.getElementById('summaryAlertContainer').innerHTML = '<div class="summary-alert">A LISTA DE CONTATOS FOI ALTERADA!<br>Por favor, gere as mensagens novamente para garantir que os dados estão corretos.</div>';
                 document.getElementById('summaryTable').innerHTML = '';
                 document.getElementById('finalStartDispatchBtn').disabled = true;
@@ -151,30 +154,63 @@ const html = `
             }
 
             // ===================================================================
-            // MÓDULO DO CARD 1: SELEÇÃO DE CONTATOS
+            // MÓDULO DO CARD 1: SELEÇÃO DE CONTATOS (COM PAGINAÇÃO)
             // ===================================================================
             (() => {
                 const wrapper = document.getElementById('card1_wrapper');
                 if (!wrapper) return;
                 
-                wrapper.innerHTML = \`<div class="contacts-table-container"><h2>CONTATOS DISPONÍVEIS</h2><input type="text" id="searchInput" placeholder="Pesquisar por nome..."><div class="table-scroll-wrapper"><table id="contactsTable"><thead><tr><th><input type="checkbox" id="selectAllCheckbox" title="Selecionar todos os visíveis"></th><th>AÇÕES</th><th data-column="push_name">NOME <span class="sort-indicator"></span></th><th data-column="remote_jid">CONTATO <span class="sort-indicator"></span></th><th data-column="created_at">DT CADASTRO <span class="sort-indicator"></span></th><th data-column="updated_at">DT ÚLTIMA MSG <span class="sort-indicator"></span></th></tr></thead><tbody></tbody></table></div></div><div class="selected-contacts-container"><h2>SELECIONADOS (<span id="selectedCount">0</span>/<span id="maxCount">30</span>)</h2><div class="table-scroll-wrapper"><table id="selectedTable"><thead><tr><th>#</th><th>AÇÃO</th><th>NOME</th></tr></thead><tbody></tbody></table></div></div>\`;
-
+                wrapper.innerHTML = \`<div class="contacts-table-container"><h2 style="border-radius: 6px 6px 0 0;">CONTATOS DISPONÍVEIS</h2><div style="padding: 1rem; background-color: var(--card-bg-color); border-radius: 0 0 6px 6px;"><input type="text" id="searchInput" placeholder="Pesquisar por nome..."><div class="table-scroll-wrapper" style="border: none; border-radius: 0;"><table id="contactsTable"><thead><tr><th><input type="checkbox" id="selectAllCheckbox" title="Selecionar todos os visíveis"></th><th>AÇÕES</th><th data-column="push_name">NOME <span class="sort-indicator"></span></th><th data-column="remote_jid">CONTATO <span class="sort-indicator"></span></th><th data-column="created_at">DT CADASTRO <span class="sort-indicator"></span></th><th data-column="updated_at">DT ÚLTIMA MSG <span class="sort-indicator"></span></th></tr></thead><tbody></tbody></table></div><div id="pagination-controls"><button id="prevPageBtn" class="btn btn-secondary">&lt; Anterior</button><span id="pageIndicator"></span><button id="nextPageBtn" class="btn btn-secondary">Próxima &gt;</button></div></div></div><div class="selected-contacts-container"><h2>SELECIONADOS (<span id="selectedCount">0</span>/<span id="maxCount">${maxSelectionsFinal}</span>)</h2><div class="table-scroll-wrapper" style="border-radius: 6px;"><table id="selectedTable"><thead><tr><th>#</th><th>AÇÃO</th><th>NOME</th></tr></thead><tbody></tbody></table></div></div>\`;
+                
                 const MAX_SELECTIONS =  ${maxSelectionsFinal};
                 const contacts = ${JSON.stringify(contacts)};
-                let currentDisplayData = [...contacts];
+                let filteredData = [...contacts];
                 let sortState = { column: 'push_name', direction: 'asc' };
+                let currentPage = 1;
+                const recordsPerPage = 100;
+
                 const searchInput = document.getElementById('searchInput'), contactsTableBody = document.querySelector('#contactsTable tbody'), selectedTableBody = document.querySelector('#selectedTable tbody'), selectedCountSpan = document.getElementById('selectedCount'), maxCountSpan = document.getElementById('maxCount'), contactsThead = document.querySelector('#contactsTable thead'), selectAllCheckbox = document.getElementById('selectAllCheckbox');
+                const prevPageBtn = document.getElementById('prevPageBtn'), nextPageBtn = document.getElementById('nextPageBtn'), pageIndicator = document.getElementById('pageIndicator');
                 
                 const formatDate = (iso) => iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A';
-                function renderContactsTable() { contactsTableBody.innerHTML = ''; const limit = selectedContactIds.size >= MAX_SELECTIONS; currentDisplayData.forEach(c => { const tr = document.createElement('tr'); tr.dataset.contactId = c.id; const isSelected = selectedContactIds.has(c.id.toString()); if (isSelected) tr.classList.add('selected-row'); const phone = formatPhone(c.remote_jid); tr.innerHTML = \`<td><input type="checkbox" class="contact-checkbox" \${isSelected ? 'checked' : ''} \${!isSelected && limit ? 'disabled' : ''}></td><td>\${createWhatsAppButtonHTML(phone)}</td><td>\${toTitleCase(c.push_name)}</td><td>\${phone}</td><td>\${formatDate(c.created_at)}</td><td>\${formatDate(c.updated_at)}</td>\`; contactsTableBody.appendChild(tr); }); }
+                
+                function renderPage() {
+                    contactsTableBody.innerHTML = '';
+                    const totalPages = Math.ceil(filteredData.length / recordsPerPage);
+                    currentPage = Math.max(1, Math.min(currentPage, totalPages));
+                    const start = (currentPage - 1) * recordsPerPage;
+                    const end = start + recordsPerPage;
+                    const pageData = filteredData.slice(start, end);
+                    const limit = selectedContactIds.size >= MAX_SELECTIONS;
+                    
+                    pageData.forEach(c => {
+                        const tr = document.createElement('tr');
+                        tr.dataset.contactId = c.id;
+                        const isSelected = selectedContactIds.has(c.id.toString());
+                        if (isSelected) tr.classList.add('selected-row');
+                        const phone = formatPhone(c.remote_jid);
+                        tr.innerHTML = \`<td><input type="checkbox" class="contact-checkbox" \${isSelected ? 'checked' : ''} \${!isSelected && limit ? 'disabled' : ''}></td><td>\${createWhatsAppButtonHTML(phone)}</td><td>\${toTitleCase(c.push_name)}</td><td>\${phone}</td><td>\${formatDate(c.created_at)}</td><td>\${formatDate(c.updated_at)}</td>\`;
+                        contactsTableBody.appendChild(tr);
+                    });
+
+                    pageIndicator.textContent = \`Página \${totalPages > 0 ? currentPage : 0} de \${totalPages}\`;
+                    prevPageBtn.disabled = currentPage === 1;
+                    nextPageBtn.disabled = currentPage === totalPages || totalPages === 0;
+                }
+                
                 function renderSelectedTable() { selectedTableBody.innerHTML = ''; selectedCountSpan.textContent = selectedContactIds.size; let counter = 1; contacts.forEach(c => { if (selectedContactIds.has(c.id.toString())) { const tr = document.createElement('tr'); const phone = formatPhone(c.remote_jid); tr.innerHTML = \`<td>\${counter++}.</td><td>\${createWhatsAppButtonHTML(phone)}</td><td>\${toTitleCase(c.push_name)}</td>\`; selectedTableBody.appendChild(tr); } }); }
-                function applySort() { const { column, direction } = sortState; currentDisplayData.sort((a, b) => { const vA = a[column], vB = b[column]; if (vA === null || vA === undefined) return 1; if (vB === null || vB === undefined) return -1; let c = 0; if (vA > vB) c = 1; else if (vA < vB) c = -1; return direction === 'asc' ? c : c * -1; }); }
-                contactsThead.addEventListener('click', (e) => { const h = e.target.closest('th'); if (!h || !h.dataset.column) return; const c = h.dataset.column; if (sortState.column === c) sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc'; else { sortState.column = c; sortState.direction = 'asc'; } applySort(); renderContactsTable(); });
-                searchInput.addEventListener('input', (e) => { currentDisplayData = contacts.filter(c => c.push_name && c.push_name.toLowerCase().includes(e.target.value.toLowerCase())); applySort(); renderContactsTable(); });
+                function applySort() { const { column, direction } = sortState; filteredData.sort((a, b) => { const vA = a[column], vB = b[column]; if (vA === null || vA === undefined) return 1; if (vB === null || vB === undefined) return -1; let c = 0; if (vA > vB) c = 1; else if (vA < vB) c = -1; return direction === 'asc' ? c : c * -1; }); }
+                
+                contactsThead.addEventListener('click', (e) => { const h = e.target.closest('th'); if (!h || !h.dataset.column) return; const c = h.dataset.column; if (sortState.column === c) sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc'; else { sortState.column = c; sortState.direction = 'asc'; } applySort(); currentPage = 1; renderPage(); });
+                searchInput.addEventListener('input', (e) => { filteredData = contacts.filter(c => c.push_name && c.push_name.toLowerCase().includes(e.target.value.toLowerCase())); applySort(); currentPage = 1; renderPage(); });
+                prevPageBtn.addEventListener('click', () => { if (currentPage > 1) { currentPage--; renderPage(); } });
+                nextPageBtn.addEventListener('click', () => { const totalPages = Math.ceil(filteredData.length / recordsPerPage); if (currentPage < totalPages) { currentPage++; renderPage(); } });
+                
                 contactsTableBody.addEventListener('click', (e) => { if (e.target.closest('a, input[type="checkbox"]')) return; const row = e.target.closest('tr'); if (!row) return; const checkbox = row.querySelector('.contact-checkbox'); if (checkbox) checkbox.click(); });
-                contactsTableBody.addEventListener('change', (e) => { if (e.target.classList.contains('contact-checkbox')) { const cb = e.target, id = cb.closest('tr').dataset.contactId; if (cb.checked) { if (selectedContactIds.size < MAX_SELECTIONS) selectedContactIds.add(id); else { cb.checked = false; alert(\`Limite de \${MAX_SELECTIONS} seleções atingido.\`); } } else { selectedContactIds.delete(id); } renderSelectedTable(); renderContactsTable(); invalidateSummary(); } });
-                selectAllCheckbox.addEventListener('change', (e) => { const isChecked = e.target.checked; const visibleIds = currentDisplayData.map(c => c.id.toString()); if (isChecked) { visibleIds.forEach(id => { if (selectedContactIds.size < MAX_SELECTIONS) selectedContactIds.add(id); }); } else { visibleIds.forEach(id => selectedContactIds.delete(id)); } renderSelectedTable(); renderContactsTable(); invalidateSummary(); });
-                maxCountSpan.textContent = MAX_SELECTIONS; applySort(); renderContactsTable(); renderSelectedTable();
+                contactsTableBody.addEventListener('change', (e) => { if (e.target.classList.contains('contact-checkbox')) { const cb = e.target, id = cb.closest('tr').dataset.contactId; if (cb.checked) { if (selectedContactIds.size < MAX_SELECTIONS) selectedContactIds.add(id); else { cb.checked = false; alert(\`Limite de \${MAX_SELECTIONS} seleções atingido.\`); } } else { selectedContactIds.delete(id); } renderSelectedTable(); renderPage(); invalidateSummary(); } });
+                selectAllCheckbox.addEventListener('change', (e) => { const isChecked = e.target.checked; const start = (currentPage - 1) * recordsPerPage, end = start + recordsPerPage; const pageData = filteredData.slice(start, end); const visibleIds = pageData.map(c => c.id.toString()); if (isChecked) { visibleIds.forEach(id => { if (selectedContactIds.size < MAX_SELECTIONS) selectedContactIds.add(id); }); } else { visibleIds.forEach(id => selectedContactIds.delete(id)); } renderSelectedTable(); renderPage(); invalidateSummary(); });
+                
+                maxCountSpan.textContent = MAX_SELECTIONS; applySort(); renderPage(); renderSelectedTable();
             })();
 
             // ===================================================================
@@ -193,7 +229,7 @@ const html = `
                     if (Math.random() < 0.5) { saudacaoFinal = \`\${escolherAleatorio(s1Checked)}, \${nome}, \${periodo}!\`; } else { saudacaoFinal = \`\${periodo.charAt(0).toUpperCase() + periodo.slice(1)}, \${nome}, \${escolherAleatorio(s2Checked)}\`; }
                     let corpoFinal = includeCorpo.checked && corpoText.value.trim() !== '' ? escolherAleatorio(corpoText.value.split('\\n').filter(l => l.trim() !== '')) : '';
                     let ctaFinal = includeCTA.checked && ctaText.value.trim() !== '' ? escolherAleatorio(ctaText.value.split('\\n').filter(l => l.trim() !== '')) : '';
-                    previewMessage.innerHTML = [saudacaoFinal, corpoFinal, ctaFinal].filter(Boolean).join('<br><br>');
+                    previewMessage.innerHTML = [saudacaoFinal, corpoFinal, ctaFinal].filter(Boolean).join('<br>');
                 }
                 function setupValidation(group, countEl) { group.addEventListener('change', () => { const count = group.querySelectorAll('input:checked').length; countEl.textContent = count; group.previousElementSibling.classList.toggle('invalid', count < 3); }); }
                 function setupTextarea(textarea, counterEl, validationEl = null, mustEndWith = null) { textarea.addEventListener('input', () => { const lines = textarea.value.split('\\n'); let allValid = true, longest = 0; lines.forEach(line => { if (line.length > longest) longest = line.length; if (mustEndWith && line.trim() !== '' && !line.trim().endsWith(mustEndWith)) allValid = false; }); counterEl.textContent = \`\${longest}/100\`; counterEl.classList.toggle('invalid', longest > 100); textarea.classList.toggle('invalid', longest > 100); if (validationEl) validationEl.classList.toggle('invalid', !allValid); }); }
@@ -210,7 +246,6 @@ const html = `
             (() => {
                 const wrapper = document.getElementById('card3_wrapper');
                 if (!wrapper) return;
-
                 wrapper.innerHTML = \`<div class="summary-header"><button id="regenerateSummaryBtn" class="btn btn-warning">Gerar Mensagens</button><button id="finalStartDispatchBtn" class="btn btn-primary" disabled>Iniciar Envio em Massa</button></div><h2 class="summary-title">Lista de Disparo</h2><div id="summaryAlertContainer"></div><div id="summaryTable" class="summary-table"></div>\`;
                 
                 const confirmationModal = document.getElementById('confirmationModal'), confirmDispatchBtn = document.getElementById('confirmDispatchBtn'), cancelDispatchBtn = document.getElementById('cancelDispatchBtn');
@@ -253,25 +288,13 @@ const html = `
                 }
 
                 function renderSummaryTable() {
-                    summaryTable.innerHTML = ''; // Limpa a tabela
+                    summaryTable.innerHTML = '';
                     summaryData.forEach((item, index) => {
                         const row = document.createElement('div');
                         row.className = 'summary-row ' + (index % 2 === 0 ? 'pair-even' : 'pair-odd');
                         row.dataset.index = index;
-
-                        row.innerHTML = \`
-                            <div class="contact-info">
-                                <span class="count">\${index + 1}.</span>
-                                \${createWhatsAppButtonHTML(item.telefone)}
-                                <span>\${toTitleCase(item.nome)}</span>
-                            </div>
-                            <div class="contact-message">
-                                <input type="checkbox" class="edit-message-checkbox" title="Editar esta mensagem">
-                                <div class="message-content">\${item.mensagem.replace(/\\n/g, '<br>')}</div>
-                            </div>
-                        \`;
+                        row.innerHTML = \`<div class="contact-info"><span class="count">\${index + 1}.</span>\${createWhatsAppButtonHTML(item.telefone)}<span>\${toTitleCase(item.nome)}</span></div><div class="contact-message"><input type="checkbox" class="edit-message-checkbox" title="Editar esta mensagem"><div class="message-content">\${item.mensagem.replace(/\\n/g, '<br>')}</div></div>\`;
                         summaryTable.appendChild(row);
-    
                     });
                     summaryAlertContainer.innerHTML = '';
                     finalStartDispatchBtn.disabled = false;
@@ -279,10 +302,7 @@ const html = `
                 
                 summaryTable.addEventListener('change', (e) => {
                     if(e.target.classList.contains('edit-message-checkbox')) {
-                        const row = e.target.closest('.summary-row');
-                        const contentDiv = row.querySelector('.message-content');
-                        const index = parseInt(row.dataset.index);
-
+                        const row = e.target.closest('.summary-row'), contentDiv = row.querySelector('.message-content'), index = parseInt(row.dataset.index);
                         if(e.target.checked) {
                             const currentMessage = summaryData[index].mensagem;
                             contentDiv.innerHTML = \`<textarea style="width: 100%; min-height: 80px;" class="dynamic-textarea">\${currentMessage}</textarea>\`;
@@ -294,52 +314,21 @@ const html = `
                         }
                     }
                 });
-                
-                summaryTable.addEventListener('input', (e) => {
-                     if(e.target.classList.contains('dynamic-textarea')) {
-                        const row = e.target.closest('.summary-row'), index = parseInt(row.dataset.index);
-                        summaryData[index].mensagem = e.target.value;
-                    }
-                });
-
+                summaryTable.addEventListener('input', (e) => { if(e.target.classList.contains('dynamic-textarea')) { const row = e.target.closest('.summary-row'), index = parseInt(row.dataset.index); summaryData[index].mensagem = e.target.value; } });
                 regenerateSummaryBtn.addEventListener('click', generateSummary);
-                finalStartDispatchBtn.addEventListener('click', () => {
-                    modalMessage.textContent = \`Podemos começar o disparo para \${summaryData.length} contato(s)?\`;
-                    modalActions.style.display = 'flex';
-                    confirmDispatchBtn.textContent = 'SIM';
-                    confirmationModal.style.display = 'flex'
-                });
-
+                finalStartDispatchBtn.addEventListener('click', () => { modalMessage.textContent = \`Podemos começar o disparo para \${summaryData.length} contato(s)?\`; modalActions.style.display = 'flex'; confirmDispatchBtn.textContent = 'SIM'; confirmationModal.style.display = 'flex' });
                 confirmDispatchBtn.addEventListener('click', async () => {
-                    confirmDispatchBtn.disabled = true;
-                    confirmDispatchBtn.textContent = 'Enviando...';
-                    modalMessage.textContent = 'Iniciando o disparo. Por favor, aguarde.';
-                    
+                    confirmDispatchBtn.disabled = true; confirmDispatchBtn.textContent = 'Enviando...'; modalMessage.textContent = 'Iniciando o disparo. Por favor, aguarde.';
                     try {
                         const response = await fetch('https://webhook.efetiva.tech/webhook/executa-disparo-massa-marcio', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(summaryData)
+                            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(summaryData)
                         });
-
-                        if (response.ok) {
-                           modalMessage.textContent = 'Disparo iniciado com sucesso!';
-                        } else {
-                           const errorData = await response.json().catch(() => ({ message: \`HTTP \${response.status}: \${response.statusText}\` }));
-                           modalMessage.textContent = \`Erro ao iniciar o disparo: \${errorData.message}\`;
-                        }
+                        if (response.ok) { modalMessage.textContent = 'Disparo iniciado com sucesso!'; }
+                        else { const errorData = await response.json().catch(() => ({ message: \`HTTP \${response.status}: \${response.statusText}\` })); modalMessage.textContent = \`Erro ao iniciar o disparo: \${errorData.message}\`; }
                     } catch (error) {
                         modalMessage.textContent = \`Erro de rede: \${error.message}\`;
                     } finally {
-                        // Bloco alterado:
-                        setTimeout(() => { 
-                            // Esconde o modal
-                            confirmationModal.style.display = 'none'; 
-                            
-                            // [AQUI ESTÁ A MUDANÇA] Força o recarregamento da página
-                            window.location.reload();
-                
-                        }, 3000); // A página irá recarregar após 3 segundos
+                        setTimeout(() => { confirmationModal.style.display = 'none'; confirmDispatchBtn.disabled = false; confirmDispatchBtn.textContent = 'SIM'; window.location.reload(); }, 3000);
                     }
                 });
                 cancelDispatchBtn.addEventListener('click', () => confirmationModal.style.display = 'none');
@@ -354,9 +343,9 @@ const html = `
 const data = Buffer.from(html, 'utf-8');
 
 return [{
-  binary: {
-    data: data,
-    fileName: 'index.html',
-    mimeType: 'text/html',
-  }
+  binary: {
+    data: data,
+    fileName: 'index.html',
+    mimeType: 'text/html',
+  }
 }];
