@@ -1,9 +1,11 @@
 /*
  * =================================================================================
- * == Gerador de Página de Leads v11.4 (Correção Final) ==
+ * == Gerador de Página de Leads v11.5 (Final com Efeitos Visuais) ==
  * =================================================================================
- * v11.4: Corrige o erro "getTagsAsArray is not defined" reintroduzindo a
- * função de apoio que havia sido removida acidentalmente.
+ * v11.5: Aplica os refinamentos visuais finais solicitados:
+ * - Ícone do WhatsApp e efeito de hover verde nos botões de contato.
+ * - Efeito de hover nos cards de oportunidade.
+ * - Ajuste final nos textos dos botões.
  * =================================================================================
  */
 
@@ -36,6 +38,7 @@ allLeads.sort((a, b) => { const dateA = new Date(a.data_lead || 0), dateB = new 
 // --- ETAPA 3: GERAR A PÁGINA HTML ---
 const formatarData = (dISO) => { if (!dISO) return 'N/A'; const d = new Date(dISO); d.setHours(d.getHours() - 3); return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
 const formatarValor = (valor) => { if (!valor) return null; return `R$ ${parseInt(valor).toLocaleString('pt-BR')}`; };
+const whatsappIconSvg = `<svg viewBox="0 0 24 24" class="icon-whatsapp"><path fill="currentColor" d="M12.04 2C6.58 2 2.13 6.45 2.13 12c0 1.77.46 3.45 1.28 4.95L2 22l5.25-1.38c1.45.77 3.09 1.18 4.79 1.18h.01c5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2M12.04 3.65c4.51 0 8.26 3.75 8.26 8.26s-3.75 8.26-8.26 8.26h-.01c-1.55 0-3.05-.44-4.33-1.25l-.31-.18l-3.22.84l.86-3.14l-.2-.32c-.87-1.34-1.34-2.92-1.34-4.57c0-4.51 3.75-8.26 8.26-8.26m4.33 9.84c-.22-.11-1.3-.65-1.5-.73s-.35-.11-.5.11s-.57.73-.7 1.48s-.26.22-.48.11c-1.12-.55-2.12-1.13-2.98-2.32c-.37-.53-.61-1.07-.7-1.25s-.08-.26.04-.38c.11-.11.24-.28.37-.42c.13-.14.17-.24.26-.4s.04-.22-.04-.33c-.08-.11-.5-1.2-.68-1.65c-.18-.44-.37-.38-.5-.38h-.4c-.18 0-.4.04-.61.26c-.22.22-.84.83-.84 2.02s.86 2.34 1 2.5s1.71 2.58 4.1 3.6c.59.26 1.05.41 1.41.53c.6.2 1.14.17 1.56-.08c.48-.28.84-.74.96-1.18s.12-.84.08-.95c-.04-.11-.18-.17-.4-.28"/></svg>`;
 
 const checkValorMatch = (anuncio, lead) => {
     let valorAnuncio = anuncio.valor;
@@ -48,8 +51,6 @@ const checkValorMatch = (anuncio, lead) => {
     }
 };
 
-// --- CORREÇÃO APLICADA AQUI ---
-// A função getTagsAsArray foi reintroduzida.
 const getTagsAsArray = (dados) => {
     let valorLead = dados.valor || dados.investmax_compra || dados.investmax_aluguel;
     return [
@@ -93,14 +94,11 @@ const gerarComparativo = (anuncio, lead) => {
     };
 
     const isValorMatch = checkValorMatch(anuncio, lead);
-    let valorAnuncio = anuncio.valor;
-    let valorLead = lead.valor || lead.investmax_compra || lead.investmax_aluguel;
-
     const campos = [
         { label: 'Tipo de Imóvel', an: anuncio.tipo_imovel, ld: lead.tipo_imovel || lead.tipoimovel, match: checkMatch(anuncio.tipo_imovel, lead.tipo_imovel || lead.tipoimovel) },
         { label: 'Operação', an: anuncio.tipo_operacao, ld: lead.tipo_operacao || lead.finalidade, match: checkMatch(anuncio.tipo_operacao, lead.tipo_operacao || lead.finalidade) },
         { label: 'Bairro', an: anuncio.bairro || anuncio.localizacao?.bairro, ld: lead.bairro || lead.localizacao?.bairro, match: checkMatch(anuncio.bairro || anuncio.localizacao?.bairro, lead.bairro || lead.localizacao?.bairro) },
-        { label: 'Valor', an: valorAnuncio, ld: valorLead, match: isValorMatch, format: formatarValor },
+        { label: 'Valor', an: anuncio.valor, ld: lead.valor || lead.investmax_compra || lead.investmax_aluguel, match: isValorMatch, format: formatarValor },
         { label: 'Quartos', an: anuncio.quartos, ld: lead.quartos, match: checkMatch(anuncio.quartos, lead.quartos, 'numeric') },
         { label: 'Suítes', an: anuncio.suites, ld: lead.suites, match: checkMatch(anuncio.suites, lead.suites, 'numeric') },
     ];
@@ -110,14 +108,7 @@ const gerarComparativo = (anuncio, lead) => {
         if (campo.an || campo.ld) {
             const valAnuncio = campo.format ? campo.format(campo.an) : campo.an;
             const valLead = campo.format ? campo.format(campo.ld) : campo.ld;
-            html += `
-            <li class="${campo.match ? 'match' : ''}">
-                <div class="label">${campo.label} ${campo.match ? '<span class="match-icon">✔</span>' : ''}</div>
-                <div class="values">
-                    <div class="value-item"><span>Anúncio:</span> ${valAnuncio || 'N/A'}</div>
-                    <div class="value-item"><span>Oportunidade:</span> ${valLead || 'N/A'}</div>
-                </div>
-            </li>`;
+            html += `<li class="${campo.match ? 'match' : ''}"><div class="label">${campo.label} ${campo.match ? '<span class="match-icon">✔</span>' : ''}</div><div class="values"><div class="value-item"><span>Anúncio:</span> ${valAnuncio || 'N/A'}</div><div class="value-item"><span>Oportunidade:</span> ${valLead || 'N/A'}</div></div></li>`;
         }
     }
     html += '</ul>';
@@ -138,7 +129,7 @@ const htmlString = `
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        :root { --bg: #2d3748; --card-bg: #4a5568; --text-light: #e2e8f0; --text-muted: #a0aec0; --accent: #38b2ac; --accent-hover: #319795; --border: #718096; --shadow: rgba(0,0,0,0.2); --high-glow: #68d391; --mid-glow: #f6e05e; --low-glow: #a0aec0; }
+        :root { --bg: #2d3748; --card-bg: #4a5568; --card-hover: #525c6e; --text-light: #e2e8f0; --text-muted: #a0aec0; --accent: #38b2ac; --accent-hover: #25D366; --border: #718096; --shadow: rgba(0,0,0,0.2); --high-glow: #68d391; --mid-glow: #f6e05e; --low-glow: #a0aec0; }
         body { font-family: 'Inter', sans-serif; margin: 0; background-color: var(--bg); color: var(--text-light); line-height: 1.6; }
         .wrapper { max-width: 1200px; margin: 0 auto; padding: 2rem; }
         .header { text-align: center; margin-bottom: 3rem; }
@@ -147,18 +138,18 @@ const htmlString = `
         .section-title { font-size: 1.8rem; font-weight: 600; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border); padding-bottom: 1rem; }
         
         .anuncio-card { background-color: var(--card-bg); border-radius: 16px; padding: 2rem; box-shadow: 0 10px 30px var(--shadow); border: 1px solid var(--border); margin-bottom: 3rem; }
-        .anuncio-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 1rem; margin-bottom: 2rem; }
-        .anuncio-header .section-title { margin:0; border:none; padding:0; }
+        .anuncio-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 1rem; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem; }
+        .anuncio-header .section-title { margin:0; border:none; padding:0; flex-grow: 1; }
         .anuncio-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 2rem; }
         .anuncio-info .label { font-size: 0.9rem; color: var(--text-muted); display: block; }
         .anuncio-info-section { padding-bottom: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
-        .anuncio-info-section:last-child { border-bottom: none; margin-bottom: 0; }
+        .anuncio-info-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
         .info-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
         .anuncio-texto { font-size: 0.9rem; white-space: pre-wrap; max-height: 350px; overflow-y: auto; background: #2d3748; padding: 1rem; border-radius: 8px; }
 
         .leads-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; }
         .lead-tile { background-color: var(--card-bg); border-radius: 12px; padding: 1rem 1.5rem; box-shadow: 0 5px 20px var(--shadow); border: 1px solid var(--border); cursor: pointer; transition: all 0.2s ease-in-out; display: flex; flex-direction: column; }
-        .lead-tile:hover { transform: translateY(-5px); box-shadow: 0 10px 30px var(--shadow); }
+        .lead-tile:hover { transform: translateY(-5px); box-shadow: 0 10px 30px var(--shadow); background-color: var(--card-hover); }
         .tile-content { flex-grow: 1; }
         .tile-line-1 { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
         .lead-name { font-size: 1.25rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -175,7 +166,7 @@ const htmlString = `
         .modal.is-visible { display: flex; }
         .modal-content { background-color: var(--bg); margin: auto; padding: 2rem; border: 1px solid var(--border); width: 90%; max-width: 900px; border-radius: 16px; position: relative; box-shadow: 0 10px 50px var(--shadow); }
         .close-button { color: var(--text-muted); position: absolute; top: 1rem; right: 1.5rem; font-size: 2rem; font-weight: bold; cursor: pointer; z-index: 10; }
-        .modal-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 1rem; padding-right: 2rem; }
+        .modal-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 1rem; }
         .modal-header h2 { font-size: 1.8rem; margin: 0; flex-grow: 1; }
         .modal-subheader { color: var(--text-muted); margin-bottom: 2rem; }
         .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
@@ -188,16 +179,18 @@ const htmlString = `
         .comparison-list li.match .label { color: var(--high-glow); }
         .comparison-list .match-icon { color: var(--high-glow); font-weight: bold; margin-left: 5px; }
         .message-content-modal { font-size: 0.9rem; line-height: 1.7; color: var(--text-muted); white-space: pre-wrap; max-height: 400px; overflow-y: auto; background-color: #1a202c; padding: 1rem; border-radius: 8px;}
-        .action-button { background: var(--accent); color: white !important; padding: 0.75rem 1.5rem; border-radius: 8px; text-decoration: none; font-weight: 600; white-space: nowrap; box-sizing: border-box; }
-        
+        .action-button { display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: white !important; padding: 0.75rem 1.5rem; border-radius: 8px; text-decoration: none; font-weight: 600; box-sizing: border-box; transition: background-color 0.2s; margin-right: 2em; }
+        .action-button:hover { background-color: var(--accent-hover); }
+        .icon-whatsapp { width: 1.2em; height: 1.2em; margin-left: 8px; }
+
         @media screen and (max-width: 992px) { .anuncio-grid, .modal-grid { grid-template-columns: 1fr; } .anuncio-texto { order: -1; margin-bottom: 1.5rem; } }
         @media screen and (max-width: 600px) { 
             .wrapper { padding: 1rem; } 
             .header h1 { font-size: 1.8rem; }
-            .anuncio-header, .modal-header { flex-direction: column; align-items: flex-start; gap: 1rem; } 
-            .anuncio-header .action-button, .modal-header .action-button { width: 100%; text-align: center; }
+            .anuncio-header, .modal-header { flex-direction: column; align-items: flex-start; } 
+            .anuncio-header .action-button, .modal-header .action-button { width: 100%; }
             .modal-content { padding: 1.5rem; }
-            .modal-header { padding-right: 0; }
+            .modal-header { padding-right: 2.5rem; }
         }
     </style>
 </head>
@@ -205,31 +198,31 @@ const htmlString = `
 <div class="wrapper">
     <header class="header">
         <h1>Análise de Oportunidades</h1>
-        <p>Olá <strong>${nomeAnuncianteAnonimo}</strong>, encontramos ${allLeads.length} oportunidades compatíveis com o anúncio.</p>
+        <p>Olá <strong>${nomeAnuncianteAnonimo}</strong>, encontramos ${allLeads.length} oportunidades compatíveis com seu anúncio.</p>
     </header>
 
     <div class="anuncio-card">
         <div class="anuncio-header">
              <h2 class="section-title">Anúncio Original</h2>
-             <a href="#" class="action-button">Contatar</a>
+             <a href="#" class="action-button">Contatar Anunciante ${whatsappIconSvg}</a>
         </div>
         <div class="anuncio-grid">
             <div class="anuncio-texto">${anonimizarTexto(anuncioOriginal.mensagem_conteudo)}</div>
             <div class="anuncio-info">
                  <div class="anuncio-info-section">
                     <div class="info-row">
-                        <div><span class="label">Anunciante</span>${nomeAnuncianteAnonimo}</div>
-                        <div><span class="label">Telefone</span>${anonimizarTelefone(anuncioOriginal.telefone_anunciante)}</div>
+                        <div><span class="label">Anunciante</span><br>${nomeAnuncianteAnonimo}</div>
+                        <div><span class="label">Telefone</span><br>${anonimizarTelefone(anuncioOriginal.telefone_anunciante)}</div>
                     </div>
                 </div>
                 <div class="anuncio-info-section">
                      <div class="info-row">
-                        <div><span class="label">Grupo</span>${anonimizarGrupo(anuncioOriginal.grupo_nome)}</div>
-                        <div><span class="label">Data</span>${formatarData(anuncioOriginal.mensagem_datetime)}</div>
+                        <div><span class="label">Grupo</span><br>${anonimizarGrupo(anuncioOriginal.grupo_nome)}</div>
+                        <div><span class="label">Data</span><br>${formatarData(anuncioOriginal.mensagem_datetime)}</div>
                     </div>
                 </div>
                 <div class="anuncio-info-section">
-                    <div style="font-size: 1rem; margin-bottom: 1rem; font-weight:600;">Características Principais</div>
+                    <div style="font-size: 1rem; font-weight:600; margin-bottom: 1rem;">Características Principais</div>
                     <div class="tags-container" style="border:none; padding-top:0;">${gerarTagsResumo(anuncioOriginal, 6)}</div>
                 </div>
             </div>
@@ -265,7 +258,7 @@ ${allLeads.map((lead, index) => `
         <span class="close-button" onclick="closeModal('modal-${index}')">&times;</span>
         <div class="modal-header">
             <h2>${anonimizarNome(lead.nome || lead.autor_nome)}</h2>
-            <a href="#" class="action-button">Contatar Lead</a>
+            <a href="#" class="action-button">Contatar Lead ${whatsappIconSvg}</a>
         </div>
         <div class="modal-subheader">
             <span><strong>Tipo:</strong> ${lead.tipo}</span> | 
