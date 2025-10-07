@@ -1,10 +1,9 @@
 /*
  * =================================================================================
- * == Gerador de Página de Leads v6.3 (Evolução Visual - Dark Mode Suave) ==
+ * == Gerador de Página de Leads v11.4 (Correção Final) ==
  * =================================================================================
- * Design refinado com foco em profissionalismo, clareza e identidade visual.
- * Tema escuro suave para uma estética moderna e sofisticada.
- * Inclui adaptação de dados e anonimização completa.
+ * v11.4: Corrige o erro "getTagsAsArray is not defined" reintroduzindo a
+ * função de apoio que havia sido removida acidentalmente.
  * =================================================================================
  */
 
@@ -22,87 +21,111 @@ const anonimizarTexto = (texto) => {
 // --- ETAPA 1: RECEBER E PROCESSAR OS DADOS DE ENTRADA ---
 const input = $input.first()?.json;
 const returnErrorHtml = async (msg) => { const html = `<html><body><h1>${msg}</h1></body></html>`; const buf = Buffer.from(html, 'utf8'); const bin = await this.helpers.prepareBinaryData(buf, 'e.html', 'text/html'); return [{ json: {}, binary: { data: bin } }]; };
-
-if (!input || !Array.isArray(input.oportunidades) || !Array.isArray(input.extracao_oport)) {
-    return await returnErrorHtml("Erro: Formato de dados de entrada inválido.");
-}
-
+if (!input || !Array.isArray(input.oportunidades) || !Array.isArray(input.extracao_oport)) { return await returnErrorHtml("Erro: Formato de dados inválido."); }
 const caracteristicas = input.extracao_oport.find(e => e.caracteristicas)?.caracteristicas || {};
 const localizacao = input.extracao_oport.find(e => e.localizacao)?.localizacao || {};
-
-const anuncioOriginal = {
-    oportunidades: input.oportunidades,
-    mensagem_conteudo: anonimizarTexto(input.mensagem_oport),
-    mensagem_datetime: input.data_msg_oport,
-    grupo_nome: input.grp_msg_oport,
-    ...caracteristicas,
-    localizacao: localizacao,
-};
-
+const anuncioOriginal = { oportunidades: input.oportunidades, mensagem_conteudo: input.mensagem_oport, mensagem_datetime: input.data_msg_oport, grupo_nome: input.grp_msg_oport, ...caracteristicas, localizacao: localizacao };
 let allLeads = [];
-(anuncioOriginal.oportunidades || []).forEach(item => {
-    if (item.clientes_diretos) allLeads.push({ ...item.clientes_diretos, tipo: 'Cliente Direto', data_lead: item.clientes_diretos.data_ultima_mensagem });
-    else if (item.clientes_parceiros) allLeads.push({ ...item.clientes_parceiros, tipo: 'Parceiro', data_lead: item.clientes_parceiros.mensagem_datetime });
-    else allLeads.push({ ...item, tipo: 'Imóvel Ofertado', data_lead: item.mensagem_datetime });
-});
-
+(anuncioOriginal.oportunidades || []).forEach(item => { if (item.clientes_diretos) allLeads.push({ ...item.clientes_diretos, tipo: 'Cliente Direto', data_lead: item.clientes_diretos.data_ultima_mensagem }); else if (item.clientes_parceiros) allLeads.push({ ...item.clientes_parceiros, tipo: 'Parceiro', data_lead: item.clientes_parceiros.mensagem_datetime }); else allLeads.push({ ...item, tipo: 'Imóvel Ofertado', data_lead: item.mensagem_datetime }); });
 if (allLeads.length === 0) return await returnErrorHtml("Nenhum lead compatível foi encontrado.");
 
 // --- ETAPA 2: ORDENAR POR RELEVÂNCIA ---
 const isOfertaOriginal = anuncioOriginal.intencao === 'oferta';
-allLeads.sort((a, b) => {
-    const dateA = new Date(a.data_lead || 0), dateB = new Date(b.data_lead || 0);
-    const scoreA = a.pontuacao_match ?? -1, scoreB = b.pontuacao_match ?? -1;
-    if (isOfertaOriginal) {
-        const typeA = a.tipo === 'Cliente Direto' ? 1 : 0, typeB = b.tipo === 'Cliente Direto' ? 1 : 0;
-        if (typeA !== typeB) return typeB - typeA;
-    }
-    if (dateB.getTime() !== dateA.getTime()) return dateB - dateA;
-    return scoreB - scoreA;
-});
+allLeads.sort((a, b) => { const dateA = new Date(a.data_lead || 0), dateB = new Date(b.data_lead || 0); const scoreA = a.pontuacao_match ?? -1, scoreB = b.pontuacao_match ?? -1; if (isOfertaOriginal) { const typeA = a.tipo === 'Cliente Direto' ? 1 : 0, typeB = b.tipo === 'Cliente Direto' ? 1 : 0; if (typeA !== typeB) return typeB - typeA; } if (dateB.getTime() !== dateA.getTime()) return dateB - dateA; return scoreB - scoreA; });
 
 // --- ETAPA 3: GERAR A PÁGINA HTML ---
-const formatarData = (dISO) => { if (!dISO) return 'N/A'; const d = new Date(dISO); d.setHours(d.getHours() - 3); return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+const formatarData = (dISO) => { if (!dISO) return 'N/A'; const d = new Date(dISO); d.setHours(d.getHours() - 3); return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
+const formatarValor = (valor) => { if (!valor) return null; return `R$ ${parseInt(valor).toLocaleString('pt-BR')}`; };
 
-const gerarListaDetalhes = (dados) => {
-    const icons = {
-        'Tipo de Imóvel': 'M16 12H2V11H16V12ZM16 7H2V6H16V7ZM20.1 17H2V16H20.1V17ZM22 3.89999V2H0V15H17.9V10.15L22 13.1V3.89999Z',
-        'Operação': 'M12,17.27L18.18,21L17,14.64L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7,14.64L5.82,21L12,17.27Z',
-        'Bairro': 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13C19 5.13 15.87 2 12 2zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z',
-        'Quartos': 'M20 9.55V3H4v8.35c.61.35 1.16.78 1.68 1.29C6.43 13.4 7 14.16 7 15H3v-2H1v6h2v-2h4c0 1.08.27 2.1.75 3H4v2h16v-2h-.75c.48-.9.75-1.92.75-3H21v-2h-2v-2h2V9c-1.4-.44-2.53-1.45-3-2.7V3H13v3.3c-.47 1.25-1.6 2.26-3 2.7zM18 8H6V5h12v3z',
-        'Suítes': 'M2 6h5v3H2zm0 5h5v3H2zm0 5h5v3H2zM22 5H12a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2h1a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1zm-1 3h-8V7h8v1z',
-        'Banheiros': 'M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10,10-4.48,10-10S17.52,2,12,2zM12,20c-4.41,0-8-3.59-8-8s3.59-8,8-8,8,3.59,8,8S16.41,20,12,20z M16.5,13H15v4h-1.5v-4H12v-1.5h1.5V7.04h1.5V11.5H16.5V13z M7.5,13H9V7.04h1.5V11.5H12v1.5H7.5V13z',
-        'Vagas': 'M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5S18.33 16 17.5 16zM5 11l1.5-4.5h11L19 11H5z',
-        'Área (m²)': 'M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 16H5V5h14v14zM7 10h3v3H7zm5 0h3v3h-3zm-5 5h3v3H7zm5 0h3v3h-3z'
-    };
-    const isOferta = dados.intencao === 'oferta' || dados.tipo_operacao === 'venda' || dados.tipo_operacao === 'aluguel';
-    const titulo = isOferta ? 'Dados do Imóvel:' : 'Dados da Procura:';
+const checkValorMatch = (anuncio, lead) => {
+    let valorAnuncio = anuncio.valor;
+    let valorLead = lead.valor || lead.investmax_compra || lead.investmax_aluguel;
+    if (!valorAnuncio || !valorLead) return false;
+    if (anuncio.intencao === 'oferta') {
+        return parseInt(valorAnuncio) <= parseInt(valorLead);
+    } else { // 'procura'
+        return parseInt(valorAnuncio) >= parseInt(valorLead);
+    }
+};
+
+// --- CORREÇÃO APLICADA AQUI ---
+// A função getTagsAsArray foi reintroduzida.
+const getTagsAsArray = (dados) => {
     let valorLead = dados.valor || dados.investmax_compra || dados.investmax_aluguel;
+    return [
+        dados.tipo_imovel || dados.tipoimovel,
+        dados.tipo_operacao || dados.finalidade,
+        dados.bairro || dados.localizacao?.bairro,
+        dados.quartos ? `${dados.quartos}q` : null,
+        dados.suites ? `${dados.suites}s` : null,
+        formatarValor(valorLead),
+    ].filter(t => t).map(t => String(t).trim().toLowerCase());
+};
 
-    const detalhes = [
-        { label: 'Tipo de Imóvel', value: dados.tipo_imovel || dados.tipoimovel },
-        { label: 'Operação', value: dados.tipo_operacao || dados.finalidade },
-        { label: 'Bairro', value: dados.bairro || dados.localizacao?.bairro },
-        { label: 'Quartos', value: dados.quartos },
-        { label: 'Suítes', value: dados.suites },
-        { label: 'Banheiros', value: dados.banheiros },
-        { label: 'Vagas', value: dados.vagas_garagem },
-        { label: 'Área (m²)', value: dados.area_m2 },
-        { label: isOferta ? 'Valor' : 'Orçamento', value: valorLead ? `R$ ${parseInt(valorLead).toLocaleString('pt-BR')}` : null },
-        { label: 'Condomínio', value: dados.condominio ? `R$ ${parseInt(dados.condominio).toLocaleString('pt-BR')}` : null },
-        { label: 'IPTU', value: dados.iptu ? `R$ ${parseInt(dados.iptu).toLocaleString('pt-BR')}` : null },
+const gerarTagsResumo = (dados, max = 6, anuncioRef, scoreClass = 'low') => {
+    let valorLead = dados.valor || dados.investmax_compra || dados.investmax_aluguel;
+    const isValorMatch = anuncioRef ? checkValorMatch(anuncioRef, dados) : false;
+
+    const priorityTags = [
+        { value: formatarValor(valorLead), match: isValorMatch },
+        { value: dados.tipo_imovel || dados.tipoimovel, match: anuncioRef ? String(anuncioRef.tipo_imovel || '').toLowerCase() === String(dados.tipo_imovel || dados.tipoimovel || '').toLowerCase() : false },
+        { value: dados.tipo_operacao || dados.finalidade, match: anuncioRef ? String(anuncioRef.tipo_operacao || '').toLowerCase() === String(dados.tipo_operacao || dados.finalidade || '').toLowerCase() : false },
+        { value: dados.bairro || dados.localizacao?.bairro, match: anuncioRef ? String(anuncioRef.bairro || anuncioRef.localizacao?.bairro || '').toLowerCase() === String(dados.bairro || dados.localizacao?.bairro || '').toLowerCase() : false },
+    ].filter(t => t.value);
+
+    const otherTags = [
+        { value: dados.quartos ? `${dados.quartos}q` : null, match: anuncioRef ? parseInt(anuncioRef.quartos) === parseInt(dados.quartos) : false },
+        { value: dados.suites ? `${dados.suites}s` : null, match: anuncioRef ? parseInt(anuncioRef.suites) === parseInt(dados.suites) : false },
+    ].filter(t => t.value);
+
+    const allTags = [...priorityTags, ...otherTags];
+    
+    return allTags.slice(0, max).map(t => {
+        return `<span class="tag ${t.match ? `tag-match ${scoreClass}` : ''}">${t.value}</span>`;
+    }).join(' ');
+};
+
+const gerarComparativo = (anuncio, lead) => {
+    const checkMatch = (val1, val2, type = 'string') => {
+        if (val1 === null || val1 === undefined || val2 === null || val2 === undefined) return false;
+        if (type === 'numeric') { return parseInt(val1) === parseInt(val2); }
+        return String(val1).trim().toLowerCase() === String(val2).trim().toLowerCase();
+    };
+
+    const isValorMatch = checkValorMatch(anuncio, lead);
+    let valorAnuncio = anuncio.valor;
+    let valorLead = lead.valor || lead.investmax_compra || lead.investmax_aluguel;
+
+    const campos = [
+        { label: 'Tipo de Imóvel', an: anuncio.tipo_imovel, ld: lead.tipo_imovel || lead.tipoimovel, match: checkMatch(anuncio.tipo_imovel, lead.tipo_imovel || lead.tipoimovel) },
+        { label: 'Operação', an: anuncio.tipo_operacao, ld: lead.tipo_operacao || lead.finalidade, match: checkMatch(anuncio.tipo_operacao, lead.tipo_operacao || lead.finalidade) },
+        { label: 'Bairro', an: anuncio.bairro || anuncio.localizacao?.bairro, ld: lead.bairro || lead.localizacao?.bairro, match: checkMatch(anuncio.bairro || anuncio.localizacao?.bairro, lead.bairro || lead.localizacao?.bairro) },
+        { label: 'Valor', an: valorAnuncio, ld: valorLead, match: isValorMatch, format: formatarValor },
+        { label: 'Quartos', an: anuncio.quartos, ld: lead.quartos, match: checkMatch(anuncio.quartos, lead.quartos, 'numeric') },
+        { label: 'Suítes', an: anuncio.suites, ld: lead.suites, match: checkMatch(anuncio.suites, lead.suites, 'numeric') },
     ];
-    const listaHtml = detalhes.filter(item => item.value !== null && item.value !== undefined && item.value !== '').map(item => `
-    <li>
-      <svg class="icon" viewBox="0 0 24 24"><path fill="currentColor" d="${icons[item.label] || icons['Bairro']}"></path></svg>
-      <div><strong>${item.label}:</strong> ${item.value}</div>
-    </li>`).join('');
-    return listaHtml ? `<h3>${titulo}</h3><ul>${listaHtml}</ul>` : '';
+
+    let html = '<ul>';
+    for (const campo of campos) {
+        if (campo.an || campo.ld) {
+            const valAnuncio = campo.format ? campo.format(campo.an) : campo.an;
+            const valLead = campo.format ? campo.format(campo.ld) : campo.ld;
+            html += `
+            <li class="${campo.match ? 'match' : ''}">
+                <div class="label">${campo.label} ${campo.match ? '<span class="match-icon">✔</span>' : ''}</div>
+                <div class="values">
+                    <div class="value-item"><span>Anúncio:</span> ${valAnuncio || 'N/A'}</div>
+                    <div class="value-item"><span>Oportunidade:</span> ${valLead || 'N/A'}</div>
+                </div>
+            </li>`;
+        }
+    }
+    html += '</ul>';
+    return html;
 };
 
 const nomeAnuncianteAnonimo = anonimizarNome(anuncioOriginal.nome_anunciante);
-const headerTitle = `Olá, ${nomeAnuncianteAnonimo}! Encontramos ${allLeads.length} oportunidades para o seu anúncio.`;
-const leadTitle = `2 Potenciais Clientes Encontrados`; // Alterado para corresponder à imagem e manter o contador
+const anuncioTagsSet = new Set(getTagsAsArray(anuncioOriginal));
 
 const htmlString = `
 <!DOCTYPE html>
@@ -110,147 +133,170 @@ const htmlString = `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Oportunidades</title>
+    <title>Análise de Oportunidades</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        :root { 
-            --bg-color: #36393F; /* Cinza escuro */
-            --card-bg: #40444B; /* Cinza um pouco mais claro para cards */
-            --text-primary: #FFFFFF; /* Branco puro */
-            --text-secondary: #BBBBBB; /* Cinza claro para detalhes */
-            --accent-color: #1abc9c; /* Verde-azulado */
-            --accent-hover: #16a085; /* Verde-azulado mais escuro */
-            --border-color: #2F3136; /* Borda mais escura */
-            --shadow-color: rgba(0,0,0,0.2); /* Sombra mais visível no tema escuro */
-            --text-code-bg: #2F3136; /* Fundo para o código da mensagem */
-            --lead-header-bg: #52565C; /* Fundo para o cabeçalho do lead */
-            --lead-header-hover: #60656B; /* Hover para o cabeçalho do lead */
-        }
-        body { font-family: 'Poppins', sans-serif; margin: 0; background-color: var(--bg-color); color: var(--text-primary); }
-        .container { max-width: 1200px; margin: 2rem auto; padding: 2rem; }
-        .header { text-align: center; margin-bottom: 2.5rem; }
-        .header h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-primary); }
-        .header p { font-size: 1.2rem; color: var(--text-secondary); margin-top: 0; }
-        .card { background-color: var(--card-bg); border-radius: 12px; box-shadow: 0 4px 25px var(--shadow-color); margin-bottom: 2.5rem; border: 1px solid var(--border-color); }
-        .card-header { padding: 1rem 1.5rem; background-color: #4C5056; /* Um pouco mais escuro para o cabeçalho do card */ border-bottom: 1px solid var(--border-color); display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem; border-radius: 12px 12px 0 0;}
-        .card-header-info { font-size: 0.9rem; color: var(--text-secondary); }
-        .card-header-info strong { color: var(--text-primary); }
-        .card-content { display: grid; grid-template-columns: 3fr 2fr; gap: 2rem; padding: 1.5rem; }
-        .column-text { white-space: pre-wrap; background-color: var(--text-code-bg); border-radius: 8px; padding: 1rem; font-size: 0.9rem; line-height: 1.6; color: var(--text-secondary);}
-        .column-details h3 { font-size: 1.2rem; margin-top: 0; margin-bottom: 1rem; color: var(--text-primary); }
-        .column-details ul { margin: 0; padding: 0; list-style-type: none; }
-        .column-details li { display: flex; align-items: center; margin-bottom: 0.75rem; font-size: 0.95rem; color: var(--text-secondary); }
-        .column-details li strong { color: var(--text-primary); }
-        .column-details .icon { width: 20px; height: 20px; margin-right: 10px; color: var(--accent-color); }
-        .action-button { display: inline-block; padding: 0.75rem 1.5rem; background-color: var(--accent-color); color: white !important; text-decoration: none; border-radius: 50px; font-weight: 600; transition: all 0.2s; }
-        .action-button:hover { background-color: var(--accent-hover); transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .section-title { font-size: 1.8rem; font-weight: 600; margin-bottom: 1.5rem; color: var(--text-primary); }
-        .lead-card { background-color: var(--card-bg); border-radius: 12px; margin-bottom: 1rem; box-shadow: 0 2px 15px var(--shadow-color); border: 1px solid var(--border-color); }
-        .lead-header { display: flex; align-items: center; padding: 1rem 1.5rem; cursor: pointer; background-color: var(--lead-header-bg); border-radius: 12px; transition: background-color 0.2s; }
-        .lead-header:hover { background-color: var(--lead-header-hover); }
-        .score-col { flex: 0 0 80px; text-align: center; font-weight: 700; font-size: 1.5rem; display: flex; align-items: center; justify-content: center; gap: 5px; }
-        .score-high { color: #28a745; } /* Verde para scores altos */
-        .score-mid { color: #ffc107; } /* Amarelo para scores médios */
-        .score-low { color: #BBBBBB; } /* Cinza claro para scores baixos */
-        .type-col { flex: 0 0 130px; }
-        .name-col { flex: 1 1 auto; font-weight: 600; font-size: 1.1rem; color: var(--text-primary); }
-        .date-col { flex: 0 0 120px; color: var(--text-secondary); text-align: right; font-weight: 500; }
-        .action-col { flex: 0 0 40px; text-align: right; font-size: 1.5rem; color: var(--text-secondary); transition: transform 0.3s; }
-        .lead-type { font-size: 0.8rem; font-weight: 600; padding: 0.25rem 0.75rem; border-radius: 50px; color: white; }
-        .type-direto { background-color: #17a2b8; } /* Azul ciano */
-        .type-parceiro { background-color: #6c757d; } /* Cinza médio */
-        .type-imovel { background-color: #fd7e14; } /* Laranja */
-        .lead-details { display: none; padding: 0 1.5rem 1.5rem 1.5rem; border-top: 1px solid var(--border-color); background-color: var(--card-bg); border-radius: 0 0 12px 12px; }
-        .details-footer { text-align: right; padding-top: 1rem; border-top: 1px solid var(--border-color); }
-        .rotated { transform: rotate(180deg); }
-        @media screen and (max-width: 992px) { .card-content { grid-template-columns: 1fr; } .column-text { margin-bottom: 2rem; } }
-        @media screen and (max-width: 768px) {
-            .container { padding: 1rem; margin: 0; width: 100%; box-sizing: border-box; }
-            .header h1 { font-size: 1.8rem; } .header p { font-size: 1rem; }
-            .lead-header { flex-wrap: wrap; row-gap: 0.5rem; }
-            .name-col { width: 100%; order: 1; flex-basis: 100%; }
-            .score-col { order: 2; text-align: left; flex-grow: 1; }
-            .type-col { order: 3; text-align: right; flex-grow: 1; }
-            .date-col { order: 4; text-align: left; flex-basis: 90%; }
-            .action-col { order: 5; text-align: right; flex-basis: 10%; }
+        :root { --bg: #2d3748; --card-bg: #4a5568; --text-light: #e2e8f0; --text-muted: #a0aec0; --accent: #38b2ac; --accent-hover: #319795; --border: #718096; --shadow: rgba(0,0,0,0.2); --high-glow: #68d391; --mid-glow: #f6e05e; --low-glow: #a0aec0; }
+        body { font-family: 'Inter', sans-serif; margin: 0; background-color: var(--bg); color: var(--text-light); line-height: 1.6; }
+        .wrapper { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+        .header { text-align: center; margin-bottom: 3rem; }
+        .header h1 { font-size: 2.5rem; margin: 0; }
+        .header p { color: var(--text-muted); font-size: 1.1rem; }
+        .section-title { font-size: 1.8rem; font-weight: 600; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border); padding-bottom: 1rem; }
+        
+        .anuncio-card { background-color: var(--card-bg); border-radius: 16px; padding: 2rem; box-shadow: 0 10px 30px var(--shadow); border: 1px solid var(--border); margin-bottom: 3rem; }
+        .anuncio-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 1rem; margin-bottom: 2rem; }
+        .anuncio-header .section-title { margin:0; border:none; padding:0; }
+        .anuncio-grid { display: grid; grid-template-columns: 3fr 2fr; gap: 2rem; }
+        .anuncio-info .label { font-size: 0.9rem; color: var(--text-muted); display: block; }
+        .anuncio-info-section { padding-bottom: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+        .anuncio-info-section:last-child { border-bottom: none; margin-bottom: 0; }
+        .info-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+        .anuncio-texto { font-size: 0.9rem; white-space: pre-wrap; max-height: 350px; overflow-y: auto; background: #2d3748; padding: 1rem; border-radius: 8px; }
+
+        .leads-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; }
+        .lead-tile { background-color: var(--card-bg); border-radius: 12px; padding: 1rem 1.5rem; box-shadow: 0 5px 20px var(--shadow); border: 1px solid var(--border); cursor: pointer; transition: all 0.2s ease-in-out; display: flex; flex-direction: column; }
+        .lead-tile:hover { transform: translateY(-5px); box-shadow: 0 10px 30px var(--shadow); }
+        .tile-content { flex-grow: 1; }
+        .tile-line-1 { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+        .lead-name { font-size: 1.25rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .score { font-size: 1.5rem; font-weight: 700; flex-shrink: 0; }
+        .score.high { color: var(--high-glow); } .score.mid { color: var(--mid-glow); } .score.low { color: var(--text-muted); }
+        .tile-line-2 { font-size: 0.85rem; color: var(--text-muted); margin-top: -5px; margin-bottom: 1rem; }
+        .tags-container { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--border); }
+        .tag { font-size: 0.75rem; font-weight: 500; padding: 0.25rem 0.75rem; border-radius: 50px; background-color: #2d3748; border: 1px solid var(--border); }
+        .tag-match.high { border-color: var(--high-glow); background-color: rgba(104, 211, 145, 0.1); }
+        .tag-match.mid { border-color: var(--mid-glow); background-color: rgba(246, 224, 94, 0.1); }
+        .tag-match.low { border-color: var(--low-glow); background-color: rgba(160, 174, 192, 0.1); }
+        
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.7); backdrop-filter: blur(5px); align-items: center; justify-content: center; }
+        .modal.is-visible { display: flex; }
+        .modal-content { background-color: var(--bg); margin: auto; padding: 2rem; border: 1px solid var(--border); width: 90%; max-width: 900px; border-radius: 16px; position: relative; box-shadow: 0 10px 50px var(--shadow); }
+        .close-button { color: var(--text-muted); position: absolute; top: 1rem; right: 1.5rem; font-size: 2rem; font-weight: bold; cursor: pointer; z-index: 10; }
+        .modal-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 1rem; padding-right: 2rem; }
+        .modal-header h2 { font-size: 1.8rem; margin: 0; flex-grow: 1; }
+        .modal-subheader { color: var(--text-muted); margin-bottom: 2rem; }
+        .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+        .comparison-list h3 { font-size: 1.1rem; color: var(--accent); margin-top: 0; margin-bottom: 1rem; }
+        .comparison-list ul { list-style: none; padding: 0; margin: 0; }
+        .comparison-list li { padding: 0.75rem 0; border-bottom: 1px solid #3a475a; display: flex; justify-content: space-between; align-items: center; }
+        .comparison-list .label { font-weight: 600; }
+        .comparison-list .values { text-align: right; font-size: 0.9rem; }
+        .comparison-list .value-item span { color: var(--text-muted); }
+        .comparison-list li.match .label { color: var(--high-glow); }
+        .comparison-list .match-icon { color: var(--high-glow); font-weight: bold; margin-left: 5px; }
+        .message-content-modal { font-size: 0.9rem; line-height: 1.7; color: var(--text-muted); white-space: pre-wrap; max-height: 400px; overflow-y: auto; background-color: #1a202c; padding: 1rem; border-radius: 8px;}
+        .action-button { background: var(--accent); color: white !important; padding: 0.75rem 1.5rem; border-radius: 8px; text-decoration: none; font-weight: 600; white-space: nowrap; box-sizing: border-box; }
+        
+        @media screen and (max-width: 992px) { .anuncio-grid, .modal-grid { grid-template-columns: 1fr; } .anuncio-texto { order: -1; margin-bottom: 1.5rem; } }
+        @media screen and (max-width: 600px) { 
+            .wrapper { padding: 1rem; } 
+            .header h1 { font-size: 1.8rem; }
+            .anuncio-header, .modal-header { flex-direction: column; align-items: flex-start; gap: 1rem; } 
+            .anuncio-header .action-button, .modal-header .action-button { width: 100%; text-align: center; }
+            .modal-content { padding: 1.5rem; }
+            .modal-header { padding-right: 0; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <header class="header">
-            <h1>Painel de Oportunidades</h1>
-            <p>${headerTitle}</p>
-        </header>
-        <div class="card">
-            <div class="card-header">
-                <div class="card-header-info">
-                    <strong>Anunciante:</strong> ${anonimizarNome(anuncioOriginal.nome_anunciante)} - ${anonimizarTelefone(anuncioOriginal.telefone_anunciante)}<br>
-                    <strong>Grupo:</strong> ${anonimizarGrupo(anuncioOriginal.grupo_nome)} | <strong>Data:</strong> ${formatarData(anuncioOriginal.mensagem_datetime)}
+<div class="wrapper">
+    <header class="header">
+        <h1>Análise de Oportunidades</h1>
+        <p>Olá <strong>${nomeAnuncianteAnonimo}</strong>, encontramos ${allLeads.length} oportunidades compatíveis com o anúncio.</p>
+    </header>
+
+    <div class="anuncio-card">
+        <div class="anuncio-header">
+             <h2 class="section-title">Anúncio Original</h2>
+             <a href="#" class="action-button">Contatar</a>
+        </div>
+        <div class="anuncio-grid">
+            <div class="anuncio-texto">${anonimizarTexto(anuncioOriginal.mensagem_conteudo)}</div>
+            <div class="anuncio-info">
+                 <div class="anuncio-info-section">
+                    <div class="info-row">
+                        <div><span class="label">Anunciante</span>${nomeAnuncianteAnonimo}</div>
+                        <div><span class="label">Telefone</span>${anonimizarTelefone(anuncioOriginal.telefone_anunciante)}</div>
+                    </div>
                 </div>
-                <a href="#" class="action-button">Contatar Anunciante</a>
-            </div>
-            <div class="card-content">
-                <div class="column-text">
-                    <h3>Anúncio Original:</h3>
-                    ${anuncioOriginal.mensagem_conteudo || ''}
+                <div class="anuncio-info-section">
+                     <div class="info-row">
+                        <div><span class="label">Grupo</span>${anonimizarGrupo(anuncioOriginal.grupo_nome)}</div>
+                        <div><span class="label">Data</span>${formatarData(anuncioOriginal.mensagem_datetime)}</div>
+                    </div>
                 </div>
-                <div class="column-details">${gerarListaDetalhes(anuncioOriginal)}</div>
+                <div class="anuncio-info-section">
+                    <div style="font-size: 1rem; margin-bottom: 1rem; font-weight:600;">Características Principais</div>
+                    <div class="tags-container" style="border:none; padding-top:0;">${gerarTagsResumo(anuncioOriginal, 6)}</div>
+                </div>
             </div>
         </div>
-        <h2 class="section-title">${leadTitle}</h2>
-        <div class="leads-list">
+    </div>
+
+    <h2 class="section-title">Oportunidades Encontradas</h2>
+    <div class="leads-grid">
         ${allLeads.map((lead, index) => {
             const score = lead.pontuacao_match ?? 0;
-            let scoreClass = score >= 40 ? 'score-high' : (score >= 25 ? 'score-mid' : 'score-low');
+            const scoreClass = score >= 40 ? 'high' : (score >= 25 ? 'mid' : 'low');
             return `
-            <div class="lead-card">
-                <div class="lead-header" onclick="toggleDetails(${index})">
-                    <div class="score-col ${scoreClass}">
-                        <svg viewBox="0 0 24 24" style="width:20px;height:20px;"><path fill="currentColor" d="M12,17.27L18.18,21L17,14.64L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7,14.64L5.82,21L12,17.27Z"></path></svg>
-                        ${score}
+            <div class="grid-tile lead-tile" onclick="openModal('modal-${index}')">
+                <div class="tile-content">
+                    <div class="tile-line-1">
+                        <h3 class="lead-name">${anonimizarNome(lead.nome || lead.autor_nome)}</h3>
+                        <span class="score ${scoreClass}">★ ${score}</span>
                     </div>
-                    <div class="type-col"><span class="lead-type ${lead.tipo === 'Cliente Direto' ? 'type-direto' : (lead.tipo === 'Parceiro' ? 'type-parceiro' : 'type-imovel')}">${lead.tipo}</span></div>
-                    <div class="name-col">${anonimizarNome(lead.nome || lead.autor_nome)}</div>
-                    <div class="date-col">${formatarData(lead.data_lead)}</div>
-                    <div class="action-col" id="arrow-${index}">
-                        <svg viewBox="0 0 24 24" style="width:24px;height:24px;"><path fill="currentColor" d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"></path></svg>
+                    <div class="tile-line-2">
+                        <span>${lead.tipo}</span> | <span>${formatarData(lead.data_lead)}</span>
                     </div>
                 </div>
-                <div class="lead-details" id="details-${index}">
-                    <div class="card-content">
-                         <div class="column-text">
-                            <h3>${isOfertaOriginal ? 'Procura Original' : 'Oferta Original'}:</h3>
-                            ${anonimizarTexto(lead.mensagem_conteudo || lead.descricao || '')}
-                        </div>
-                        <div class="column-details">
-                            ${gerarListaDetalhes(lead)}
-                            <div class="details-footer">
-                                <a href="#" class="action-button">Contatar Lead (${anonimizarTelefone(lead.telefone || lead.autor_telefone)})</a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <div class="tags-container">${gerarTagsResumo(lead, 6, anuncioOriginal, scoreClass)}</div>
             </div>
             `;
         }).join('')}
+    </div>
+</div>
+
+${allLeads.map((lead, index) => `
+<div id="modal-${index}" class="modal">
+    <div class="modal-content" onclick="event.stopPropagation()">
+        <span class="close-button" onclick="closeModal('modal-${index}')">&times;</span>
+        <div class="modal-header">
+            <h2>${anonimizarNome(lead.nome || lead.autor_nome)}</h2>
+            <a href="#" class="action-button">Contatar Lead</a>
+        </div>
+        <div class="modal-subheader">
+            <span><strong>Tipo:</strong> ${lead.tipo}</span> | 
+            <span><strong>Score:</strong> ${lead.pontuacao_match ?? 0}</span> | 
+            <span><strong>Grupo:</strong> ${anonimizarGrupo(lead.grupo_nome)}</span> | 
+            <span><strong>Data:</strong> ${formatarData(lead.data_lead)}</span>
+        </div>
+        <div class="modal-grid">
+            <div class="comparison-list">
+                <h3>Análise de Compatibilidade</h3>
+                ${gerarComparativo(anuncioOriginal, lead)}
+            </div>
+            <div class="message-content-modal">
+                <strong>Mensagem Original do Lead:</strong><br><br>
+                ${anonimizarTexto(lead.mensagem_conteudo || lead.descricao || '')}
+            </div>
         </div>
     </div>
-    <script>
-        function toggleDetails(index) {
-            const detailsRow = document.getElementById('details-' + index);
-            const arrow = document.getElementById('arrow-' + index).querySelector('svg');
-            if (detailsRow.style.display === 'grid') { // Alterado para 'grid' para corresponder ao card-content
-                detailsRow.style.display = 'none';
-                arrow.style.transform = 'rotate(0deg)';
-            } else {
-                detailsRow.style.display = 'grid'; // Alterado para 'grid'
-                arrow.style.transform = 'rotate(180deg)';
-            }
-        }
-    </script>
+</div>
+`).join('')}
+
+<script>
+    function openModal(modalId) { document.getElementById(modalId).classList.add('is-visible'); }
+    function closeModal(modalId) { document.getElementById(modalId).classList.remove('is-visible'); }
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', (event) => {
+            closeModal(modal.id);
+        });
+    });
+</script>
+
 </body>
 </html>
 `;
