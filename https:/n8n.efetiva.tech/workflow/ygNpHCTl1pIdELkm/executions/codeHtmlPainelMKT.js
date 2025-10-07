@@ -198,7 +198,7 @@ const htmlString = `
 <div class="wrapper">
     <header class="header">
         <h1>Análise de Oportunidades</h1>
-        <p>Olá <strong>${nomeAnuncianteAnonimo}</strong>, encontramos ${allLeads.length} oportunidades compatíveis com seu anúncio.</p>
+        <p>Olá <strong>${nomeAnuncianteAnonimo}</strong>, encontramos ${allLeads.length} oportunidades compatíveis com o anúncio.</p>
     </header>
 
     <div class="anuncio-card">
