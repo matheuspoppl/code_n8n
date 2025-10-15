@@ -1,55 +1,42 @@
+// ====================================================================================
+// CÓDIGO PARA O NÓ "CODE" DO N8N - GERADOR DE KANBAN (v5 - Final com Ações em Bloco)
+// Autor: Gemini
+// Descrição: Versão final com interface interativa, incluindo filtros, seleção em massa,
+//            e um menu customizado de ações para deletar, alterar IA e mover cards.
+// ====================================================================================
+
 // =================================================================
 // INÍCIO: CONFIGURAÇÕES E FUNÇÕES DE AJUDA
 // =================================================================
 
-// Webhook unificado para todas as ações de atualização do Kanban.
 const WEBHOOK_URL = 'https://webhook.efetiva.tech/webhook/crm-atualiza-efetiva';
 
-/**
- * Formata um nome completo para "Nome Sobrenome".
- * Ex: "José Carlos da Silva" -> "José Silva"
- * @param {string} fullName O nome completo.
- * @returns {string} O nome formatado.
- */
-const formatName = (fullName) => {
-  if (!fullName) return '';
-  const parts = fullName.trim().split(/\s+/);
-  if (parts.length <= 1) return toTitleCase(fullName);
-  return toTitleCase(`${parts[0]} ${parts[parts.length - 1]}`);
+const formatName = (name, phone) => {
+  const cleanPhone = phone ? phone.split('@')[0] : '';
+  if (name && name.trim() !== '' && name.trim().toLowerCase() !== 'null' && name.trim() !== cleanPhone) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length <= 1) return toTitleCase(name);
+    return toTitleCase(`${parts[0]} ${parts[parts.length - 1]}`);
+  }
+  return cleanPhone || 'Sem Nome';
 };
 
-/**
- * Converte uma string para o formato Title Case.
- * Ex: "joão silva" -> "João Silva"
- * @param {string} str A string de entrada.
- * @returns {string} A string formatada.
- */
 const toTitleCase = (str) => {
   if (!str) return '';
   return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 };
 
-/**
- * Formata um número para moeda brasileira (BRL).
- * @param {number} num O número a ser formatado.
- * @returns {string} O valor formatado como moeda.
- */
-const formatCurrency = (num) => {
-  if (num === null || num === undefined) return 'N/I';
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(num);
+const formatDate = (isoString) => {
+    if (!isoString) return 'N/I';
+    const options = { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' };
+    return new Date(isoString).toLocaleString('pt-BR', options).replace(',', '');
 };
 
-/**
- * Remove caracteres não numéricos de um telefone.
- * @param {string} phone O número de telefone.
- * @returns {string} O número de telefone limpo.
- */
 const sanitizePhoneNumber = (phone) => {
   if (!phone) return '';
   return phone.replace(/\D/g, '');
 };
 
-// Ícones em formato SVG para serem embutidos no HTML.
 const whatsappIconSvg = `<svg viewBox="0 0 24 24" fill="currentColor" height="1em" width="1em"><path d="M16.6 14c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1-.2.2-.6.8-.8 1-.1.2-.3.2-.5.1-.3-.1-1.1-.4-2.1-1.3-.8-.7-1.3-1.5-1.5-1.8-.1-.2 0-.4.1-.5.1-.1.2-.3.4-.4.1-.1.2-.2.2-.3.1-.1.1-.2 0-.4-.1-.1-.6-1.5-.8-2-.2-.5-.4-.5-.5-.5h-.5c-.2 0-.4.1-.6.3-.2.2-.8.8-.8 1.9s.8 2.2 1 2.4c.1.1 1.5 2.3 3.6 3.2.5.2.8.3 1.1.4.5.1 1 .1 1.3.1.4 0 1.1-.5 1.3-1 .2-.5.2-.9.1-1zM12 2a10 10 0 100 20 10 10 0 000-20zm0 18.4a8.4 8.4 0 110-16.8 8.4 8.4 0 010 16.8z"></path></svg>`;
 const trashIconSvg = `<svg viewBox="0 0 24 24" fill="currentColor" height="1em" width="1em"><path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14M6 19a2 2 0 002 2h8a2 2 0 002-2V7H6v12z"></path></svg>`;
 
@@ -57,62 +44,47 @@ const trashIconSvg = `<svg viewBox="0 0 24 24" fill="currentColor" height="1em" 
 // INÍCIO: LÓGICA DE PREPARAÇÃO DOS DADOS
 // =================================================================
 
-const clientes = $input.all().map(item => item.json);
+let clientes = $input.all().map(item => item.json);
+
+clientes.forEach(c => {
+    c.nome = c.nome || c.nome_partic;
+    c.telefone = c.telefone || c.fone_partic;
+});
 
 const etapasFunil = [
-  '1° CONTATO ( D )', '1° CONTATO ( E )', 'RESPONDIDO', 'QUALIFICADO ( H )',
-  'ATENÇÃO ( H )', 'ATEND. FINALIZADO', 'VISITA AGENDADA', 'VISITA FEITA',
-  'EM NEGOCIAÇÃO', 'REALIZADO', 'PERDIDO', 'CONTATO FUTURO'
+  '1° CONTATO (D)', '1° CONTATO (E)', 'INTERESSADO', 'REUNIÃO AGENDADA',
+  'REUNIÃO REALIZADA', 'NEGÓCIO FECHADO', 'CONTATO FUTURO', 'PERDIDO'
 ];
-
-const mapaDeEtapas = {
-  'PRIMEIRO CONTATO': '1° CONTATO ( E )',
-  'TRANSFERENCIA HUMANO': 'QUALIFICADO ( H )',
-  'RESPONDIDO': 'RESPONDIDO', 'EM NEGOCIAÇÃO': 'EM NEGOCIAÇÃO',
-  'REALIZADO': 'REALIZADO', 'PERDIDO': 'PERDIDO',
-};
 
 const clientesPorEtapa = {};
 etapasFunil.forEach(etapa => { clientesPorEtapa[etapa] = []; });
+
 clientes.forEach(cliente => {
   if (!cliente.etapa_funil) return;
   const etapaDoBanco = cliente.etapa_funil.toUpperCase();
-  const etapaKanban = mapaDeEtapas[etapaDoBanco] || etapasFunil.find(e => e.toUpperCase().includes(etapaDoBanco));
+  const etapaKanban = etapasFunil.find(e => e.toUpperCase() === etapaDoBanco || e.toUpperCase().includes(etapaDoBanco));
+  
   if (etapaKanban && clientesPorEtapa[etapaKanban]) {
     clientesPorEtapa[etapaKanban].push(cliente);
   }
 });
 
+for (const etapa in clientesPorEtapa) {
+  clientesPorEtapa[etapa].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
+
 // =================================================================
-//  INÍCIO: DEFINIÇÃO DE CORES DAS COLUNAS
-//  Esta é a área principal para editar as cores.
-//  Basta alterar o código de cor hexadecimal (#...) para a cor desejada.
+//  INÍCIO: DEFINIÇÃO DE CORES
 // =================================================================
 const coresDasColunas = {
-    // Etapa: 1° CONTATO ( D )
-    '1° CONTATO ( D )': '#dcdcdc',
-    // Etapa: 1° CONTATO ( E )
-    '1° CONTATO ( E )': '#dcdcdc',
-    // Etapa: RESPONDIDO
-    'RESPONDIDO': '#5f7ca7',
-    // Etapa: QUALIFICADO ( H )
-    'QUALIFICADO ( H )': '#f39c12',
-    // Etapa: ATENÇÃO ( H )
-    'ATENÇÃO ( H )': '#f1c40f',
-    // Etapa: ATEND. FINALIZADO
-    'ATEND. FINALIZADO': '#e74c3c',
-    // Etapa: VISITA AGENDADA
-    'VISITA AGENDADA': '#a9dfbf',
-    // Etapa: VISITA FEITA
-    'VISITA FEITA': '#58d68d',
-    // Etapa: EM NEGOCIAÇÃO
-    'EM NEGOCIAÇÃO': '#1a5d2d',
-    // Etapa: REALIZADO
-    'REALIZADO': '#2ecc71',
-    // Etapa: PERDIDO
-    'PERDIDO': '#6c223a',
-    // Etapa: CONTATO FUTURO
+    '1° CONTATO (D)': '#dcdcdc',
+    '1° CONTATO (E)': '#dcdcdc',
+    'INTERESSADO': '#5f7ca7',
+    'REUNIÃO AGENDADA': '#a9dfbf',
+    'REUNIÃO REALIZADA': '#58d68d',
+    'NEGÓCIO FECHADO': '#2ecc71',
     'CONTATO FUTURO': '#0d3b66',
+    'PERDIDO': '#6c223a',
 };
 
 // =================================================================
@@ -127,28 +99,28 @@ let html = `
     <title>CRM Kanban</title>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <style>
-        :root { --cor-vinho: #8B0000; }
+        :root { --cor-vinho: #8B0000; --cor-vinho-card: rgb(83 3 3 / 88%); }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #000000; color: #e2e8f0; overflow: hidden; }
-        .kanban-board { display: flex; height: 100vh; padding: 10px; padding-bottom: 25px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: thin; scrollbar-color: #4a5568 #111; }
+        .kanban-board { display: flex; height: 100vh; padding: 10px; padding-bottom: 25px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: #4a5568 #111; }
         .kanban-board::-webkit-scrollbar { height: 20px; }
         .kanban-board::-webkit-scrollbar-track { background: #111; }
         .kanban-board::-webkit-scrollbar-thumb { background-color: #4a5568; border-radius: 10px; border: 4px solid #111; }
-        .kanban-column { flex: 0 0 220px; margin: 0 5px; border-radius: 8px; display: flex; flex-direction: column; }
-        .column-title { padding: 12px; font-size: 0.9rem; font-weight: 700; color: #fff; background-color: rgba(0,0,0,0.4); border-top-left-radius: 8px; border-top-right-radius: 8px; }
+        .kanban-column { flex: 0 0 240px; margin: 0 5px; border-radius: 8px; display: flex; flex-direction: column; }
+        .column-header { background-color: rgba(0,0,0,0.4); border-top-left-radius: 8px; border-top-right-radius: 8px; }
+        .column-title { padding: 12px; font-size: 0.9rem; font-weight: 700; color: #fff; }
         .cards-container { padding: 10px; flex-grow: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.3) transparent; }
-        .cards-container::-webkit-scrollbar { width: 8px; }
-        .cards-container::-webkit-scrollbar-track { background: transparent; }
-        .cards-container::-webkit-scrollbar-thumb { background-color: rgba(0,0,0,0.4); border-radius: 10px; }
-        .kanban-card { background-color: #2d3748; border-radius: 6px; padding: 8px; margin-bottom: 8px; cursor: grab; box-shadow: 0 2px 4px rgba(0,0,0,0.4); border: 1px solid transparent; display: flex; flex-direction: column; }
+        .kanban-card { background-color: #2d3748; border-radius: 6px; padding: 8px; margin-bottom: 8px; cursor: grab; box-shadow: 0 2px 4px rgba(0,0,0,0.4); border: 1px solid transparent; display: flex; flex-direction: column; transition: background-color 0.2s; }
         .kanban-card.sortable-delay-started { cursor: grabbing; border-color: #4299e1; }
-        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-        .card-name { font-size: 0.95rem; font-weight: 600; flex-grow: 1; margin-right: 8px; }
-        .card-details { font-size: 0.75rem; color: #a0aec0; margin-bottom: 8px; text-transform: capitalize; }
+        .kanban-card.card-origem-d { background-color: var(--cor-vinho-card); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; gap: 8px; }
+        .card-name { font-size: 0.95rem; font-weight: 600; flex-grow: 1; margin-right: 8px; word-break: break-word; }
+        .card-details { font-size: 0.75rem; color: #a0aec0; margin-bottom: 8px; }
         .card-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: auto; }
-        .btn-whatsapp { background-color: #25D366; color: white; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; border: none; border-radius: 5px; transition: background-color 0.2s; padding: 0; cursor: pointer; }
+        .btn-whatsapp, .btn-delete { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border: none; border-radius: 5px; cursor: pointer; flex-shrink: 0; transition: background-color 0.2s; padding: 0; }
+        .btn-whatsapp { background-color: #25D366; color: white; font-size: 1.2rem; }
         .btn-whatsapp:hover { background-color: #1DA851; }
-        .btn-delete { background-color: var(--cor-vinho); color: white; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 1rem; border: none; border-radius: 5px; cursor: pointer; }
+        .btn-delete { background-color: var(--cor-vinho); color: white; font-size: 1rem; }
         .switch-container { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; color: #a0aec0; }
         .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
         .switch input { opacity: 0; width: 0; height: 0; }
@@ -158,13 +130,26 @@ let html = `
         input:checked + .slider:before { transform: translateX(20px); }
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 1000; }
         .modal-content { background: #2d3748; padding: 25px; border-radius: 8px; text-align: center; width: 90%; max-width: 320px; }
-        .modal-content h3 { margin-bottom: 15px; }
-        .modal-content p { margin-bottom: 20px; color: #a0aec0; }
-        .modal-content input[type="datetime-local"] { width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #4a5568; background: #1a202c; color: #fff; font-size: 1rem; margin-bottom: 20px; }
-        .modal-actions button { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: 600; }
+        .modal-actions { display: flex; justify-content: center; gap: 1rem; margin-top: 1.5rem; }
         .modal-btn-cancel { background-color: #718096; color: #fff; }
-        .modal-btn-confirm { background-color: #4299e1; color: #fff; margin-left: 10px; }
-        #modal-btn-delete { background-color: var(--cor-vinho); color: #fff; margin-left: 10px; }
+        .modal-btn-confirm { background-color: #4299e1; color: #fff; }
+        #modal-btn-delete, .btn-delete-batch { background-color: var(--cor-vinho); color: #fff; }
+
+        /* --- ESTILOS DAS FERRAMENTAS DA COLUNA --- */
+        .column-tools { padding: 0 10px 10px 10px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .column-search { width: 100%; background-color: rgba(0,0,0,0.3); border: 1px solid #555; color: #fff; border-radius: 4px; padding: 6px 8px; font-size: 0.85rem; }
+        .selection-area { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+        .select-all-label { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #ccc; cursor: pointer; user-select: none; }
+        .card-checkbox { transform: scale(1.3); flex-shrink: 0; }
+        .batch-actions-container { display: none; /* Inicia oculto */ position: relative; }
+        .batch-actions-trigger { background: #4a5568; color: #fff; border: none; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; }
+        .batch-actions-menu { display: none; position: absolute; background-color: #3e4a5c; border: 1px solid #555; border-radius: 5px; z-index: 1010; min-width: 200px; right: 0; top: 100%; margin-top: 5px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        .batch-menu-item { padding: 10px 15px; cursor: pointer; display: flex; align-items: center; gap: 8px; background-color: #3d3c45; font-size: smaller; }
+        .batch-menu-item:hover { background-color: #4a5568; }
+        .batch-menu-item svg { width: 16px; height: 16px; }
+        .batch-menu-divider { border-top: 1px solid #555; margin: 5px 0; }
+        .batch-menu-header { padding: 8px 15px; font-size: 0.9rem; color: #a0aec0; text-transform: uppercase; background-color: #101325; }
+        .batch-menu-sub-item { padding: 8px 15px 8px 25px; }
     </style>
 </head>
 <body>
@@ -172,20 +157,46 @@ let html = `
         ${
           etapasFunil.map(etapa => `
             <div class="kanban-column" style="background-color: ${coresDasColunas[etapa] || '#333'};">
-                <h2 class="column-title" data-title-etapa="${etapa}">${etapa} <span class="card-counter">(${clientesPorEtapa[etapa].length})</span></h2>
+                <div class="column-header">
+                    <h2 class="column-title" data-title-etapa="${etapa}">${etapa} <span class="card-counter">(${clientesPorEtapa[etapa].length})</span></h2>
+                    
+                    <div class="column-tools">
+                        <input type="text" class="column-search" placeholder="Filtrar nesta coluna...">
+                        <div class="selection-area">
+                            <label class="select-all-label"><input type="checkbox" class="select-all-in-column"> Todos</label>
+                            <div class="batch-actions-container">
+                                <button class="batch-actions-trigger">Ações em Bloco ▾</button>
+                                <div class="batch-actions-menu">
+                                    <div class="batch-menu-item" data-action="delete">
+                                        ${trashIconSvg} Deletar Todos
+                                    </div>
+                                    <div class="batch-menu-divider"></div>
+                                    <div class="batch-menu-header">Alterar IA</div>
+                                    <div class="batch-menu-item" data-action="ia-on">Ativar IA</div>
+                                    <div class="batch-menu-item" data-action="ia-off">Desativar IA</div>
+                                    <div class="batch-menu-divider"></div>
+                                    <div class="batch-menu-header">Mover para Etapa...</div>
+                                    ${etapasFunil.filter(e => e !== etapa).map(e => `<div class="batch-menu-item batch-menu-sub-item" data-action="move_${e}">${e}</div>`).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="cards-container" data-etapa-id="${etapa}">
                     ${
                       clientesPorEtapa[etapa].map(cliente => {
                         const isIA = (cliente.quem_responde?.toLowerCase() || 'ia') === 'ia';
+                        const telefoneLimpo = sanitizePhoneNumber(cliente.telefone);
+                        const origemClass = cliente.etapa_funil === '1° CONTATO (D)' ? 'card-origem-d' : '';
                         return `
-                        <div class="kanban-card" data-card-id="${cliente.id}">
+                        <div class="kanban-card ${origemClass}" data-card-id="${cliente.id}">
                             <div class="card-header">
-                                <div class="card-name">${formatName(cliente.nome)}</div>
-                                <a href="https://wa.me/55${sanitizePhoneNumber(cliente.telefone)}" target="_blank" class="btn-whatsapp">${whatsappIconSvg}</a>
+                                <input type="checkbox" class="card-checkbox" data-card-id="${cliente.id}">
+                                <div class="card-name">${formatName(cliente.nome, cliente.telefone)}</div>
+                                <a href="https://wa.me/${telefoneLimpo}" target="_blank" class="btn-whatsapp">${whatsappIconSvg}</a>
                             </div>
-                            <div class="card-details">
-                                ${cliente.finalidade || ''} - ${formatCurrency(cliente.finalidade?.toLowerCase().includes('venda') ? cliente.investmax_compra : cliente.investmax_aluguel)}
-                            </div>
+                            <div class="card-details">Criado em: ${formatDate(cliente.created_at)}</div>
                             <div class="card-actions">
                                 <button class="btn-delete" data-card-id="${cliente.id}">${trashIconSvg}</button>
                                 <div class="switch-container">
@@ -215,30 +226,22 @@ let html = `
             </div>
         </div>
     </div>
-
-    <div id="delete-modal" class="modal-overlay">
+    <div id="confirm-modal" class="modal-overlay">
         <div class="modal-content">
-            <h3>Confirmar Exclusão</h3>
-            <p>Tem certeza que deseja excluir este lead? Esta ação não pode ser desfeita.</p>
+            <h3 id="confirm-modal-title">Confirmar Ação</h3>
+            <p id="confirm-modal-message">Você tem certeza?</p>
             <div class="modal-actions">
                 <button class="modal-btn-cancel">Cancelar</button>
-                <button class="modal-btn-confirm" id="modal-btn-delete">Excluir</button>
+                <button class="modal-btn-confirm" id="modal-btn-confirm-action">Confirmar</button>
             </div>
         </div>
     </div>
 
     <script>
-        // Bloco de script executado após o carregamento da página.
         document.addEventListener('DOMContentLoaded', function () {
             
-            // --- VARIÁVEIS GLOBAIS E FUNÇÕES DE APOIO ---
             const webhookUrl = '${WEBHOOK_URL}';
 
-            /**
-             * Atualiza dinamicamente os contadores de cards nos títulos das colunas.
-             * @param {HTMLElement} fromContainer - O container de origem do card.
-             * @param {HTMLElement} toContainer - O container de destino do card (pode ser null se for exclusão).
-             */
             function updateCounters(fromContainer, toContainer) {
                 if (fromContainer) {
                     const fromTitle = document.querySelector(\`[data-title-etapa="\${fromContainer.dataset.etapaId}"] .card-counter\`);
@@ -250,7 +253,7 @@ let html = `
                 }
             }
 
-            // --- LÓGICA DO MODAL DE DATA E HORA ---
+            // --- LÓGICA DOS MODAIS ---
             const dateModal = document.getElementById('date-modal');
             const dateInput = document.getElementById('future-date-input');
             let dateModalResolve;
@@ -269,15 +272,21 @@ let html = `
                 dateModal.style.display = 'none';
                 if (dateModalResolve) dateModalResolve({ confirmed: false });
             };
-
-            // --- LÓGICA DO MODAL DE CONFIRMAÇÃO (GENÉRICO) ---
-            const confirmModal = document.getElementById('delete-modal');
+            
+            const confirmModal = document.getElementById('confirm-modal');
+            const confirmModalTitle = document.getElementById('confirm-modal-title');
+            const confirmModalMessage = document.getElementById('confirm-modal-message');
+            const confirmModalButton = document.getElementById('modal-btn-confirm-action');
             let confirmModalResolve;
-            function openConfirmModal() {
+            function openConfirmModal(title, message, btnText = 'Confirmar', btnClass = 'modal-btn-confirm') {
+                confirmModalTitle.textContent = title;
+                confirmModalMessage.textContent = message;
+                confirmModalButton.textContent = btnText;
+                confirmModalButton.className = \`modal-btn-confirm \${btnClass}\`;
                 confirmModal.style.display = 'flex';
                 return new Promise(resolve => { confirmModalResolve = resolve; });
             }
-            confirmModal.querySelector('#modal-btn-delete').onclick = () => {
+            confirmModalButton.onclick = () => {
                 confirmModal.style.display = 'none';
                 if(confirmModalResolve) confirmModalResolve({ confirmed: true });
             };
@@ -287,82 +296,176 @@ let html = `
             };
 
 
-            // --- LÓGICA PRINCIPAL DO DRAG AND DROP (SORTABLEJS) ---
+            // --- LÓGICA DO DRAG AND DROP ---
             document.querySelectorAll('.cards-container').forEach(container => {
                 new Sortable(container, {
-                    group: 'kanban',
-                    animation: 150,
-                    delay: 300,
-                    delayOnTouchOnly: true,
+                    group: 'kanban', animation: 150, delay: 300, delayOnTouchOnly: true,
                     onEnd: async function (evt) {
                         const cardId = evt.item.dataset.cardId;
                         const novaEtapa = evt.to.dataset.etapaId;
-
                         updateCounters(evt.from, evt.to);
-                        
                         if (novaEtapa === 'CONTATO FUTURO') {
                             const result = await openDateModal();
                             if (result.confirmed) {
-                                fetch(webhookUrl, {
-                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ updateType: 'contatoFuturo', cardId, novaEtapa, dataHoraFuturo: result.date })
-                                }).catch(console.error);
+                                fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updateType: 'etapa', cardId, novaEtapa, dataHoraFuturo: result.date }) }).catch(console.error);
                             } else {
                                 evt.from.appendChild(evt.item);
                                 updateCounters(evt.to, evt.from);
                             }
                         } else {
-                            fetch(webhookUrl, {
-                                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ updateType: 'etapa', cardId, novaEtapa })
-                            }).catch(console.error);
+                            fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updateType: 'etapa', cardId, novaEtapa }) }).catch(console.error);
                         }
                     }
                 });
             });
 
-            // --- EVENT LISTENERS PARA AÇÕES NOS CARDS ---
+            // --- EVENTOS DE AÇÃO NOS CARDS E COLUNAS ---
             document.getElementById('kanbanBoard').addEventListener('click', async function(event) {
-                // Lógica do botão de Excluir
                 const deleteButton = event.target.closest('.btn-delete');
                 if (deleteButton) {
                     const cardId = deleteButton.dataset.cardId;
                     const cardElement = deleteButton.closest('.kanban-card');
-                    
-                    const result = await openConfirmModal();
+                    const result = await openConfirmModal('Confirmar Exclusão', 'Tem certeza que deseja excluir este lead?', 'Excluir', 'btn-delete-batch');
                     if (result.confirmed) {
                         const originalContainer = cardElement.parentElement;
                         cardElement.remove();
                         updateCounters(originalContainer, null);
-
-                        fetch(webhookUrl, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ updateType: 'etapa', cardId, novaEtapa: 'excluido' })
-                        }).catch(console.error);
+                        fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updateType: 'etapa', cardId, novaEtapa: 'excluido' }) }).catch(console.error);
                     }
-                    return; // Encerra a execução para não confundir com outros eventos
                 }
 
-                // Lógica do Toggle IA/Humano (usa 'change' event)
-                const toggle = event.target;
-                if (toggle.classList.contains('ia-toggle')) {
-                    // O listener de 'change' lida com isso.
-                    return;
+                // Lógica de abrir/fechar menu de ações em bloco
+                const actionsTrigger = event.target.closest('.batch-actions-trigger');
+                if (actionsTrigger) {
+                    const menu = actionsTrigger.nextElementSibling;
+                    menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+                } else if (!event.target.closest('.batch-actions-menu')) {
+                    document.querySelectorAll('.batch-actions-menu').forEach(menu => menu.style.display = 'none');
+                }
+            });
+            
+            document.getElementById('kanbanBoard').addEventListener('change', function(event) {
+                const target = event.target;
+                const column = target.closest('.kanban-column');
+                
+                if (target.classList.contains('ia-toggle')) {
+                    const cardId = target.dataset.cardId;
+                    const novoResponsavel = target.checked ? 'ia' : 'humano';
+                    fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updateType: 'responsavel', cardId, novoResponsavel }) }).catch(console.error);
+                }
+
+                if(target.classList.contains('select-all-in-column') || target.classList.contains('card-checkbox')) {
+                    setTimeout(() => updateBatchActionsVisibility(column), 0);
+                }
+
+                if(target.classList.contains('select-all-in-column')) {
+                    const checkboxes = column.querySelectorAll('.cards-container .kanban-card:not([style*="display: none"]) .card-checkbox');
+                    checkboxes.forEach(cb => cb.checked = target.checked);
                 }
             });
 
-            // Listener separado para 'change' para o toggle, que é mais apropriado.
-            document.getElementById('kanbanBoard').addEventListener('change', function(event) {
-                const toggle = event.target;
-                if (!toggle.classList.contains('ia-toggle')) return;
-                
-                const cardId = toggle.dataset.cardId;
-                const novoResponsavel = toggle.checked ? 'ia' : 'humano';
+            document.querySelectorAll('.column-search').forEach(input => {
+                input.addEventListener('input', function(event) {
+                    const searchTerm = event.target.value.toLowerCase();
+                    const column = event.target.closest('.kanban-column');
+                    const cards = column.querySelectorAll('.kanban-card');
+                    column.querySelector('.select-all-in-column').checked = false;
+                    
+                    cards.forEach(card => {
+                        const cardName = (card.querySelector('.card-name')?.textContent || '').toLowerCase();
+                        const cardPhone = (card.querySelector('a.btn-whatsapp')?.href || '').replace('https://wa.me/', '');
+                        const isVisible = cardName.includes(searchTerm) || cardPhone.includes(searchTerm);
+                        card.style.display = isVisible ? 'flex' : 'none';
+                    });
+                    updateBatchActionsVisibility(column);
+                });
+            });
 
-                fetch(webhookUrl, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ updateType: 'responsavel', cardId, novoResponsavel })
-                }).catch(console.error);
+            // --- LÓGICA DAS AÇÕES EM MASSA ---
+            function updateBatchActionsVisibility(column) {
+                if (!column) return;
+                const container = column.querySelector('.batch-actions-container');
+                const selectedCount = column.querySelectorAll('.card-checkbox:checked').length;
+                container.style.display = selectedCount > 0 ? 'block' : 'none';
+            }
+
+            document.querySelectorAll('.batch-menu-item').forEach(item => {
+                item.addEventListener('click', async (e) => {
+                    const action = e.target.dataset.action;
+                    const column = e.target.closest('.kanban-column');
+                    const selectedCheckboxes = column.querySelectorAll('.card-checkbox:checked');
+                    const cardIds = Array.from(selectedCheckboxes).map(cb => cb.dataset.cardId);
+
+                    // Esconde o menu após clicar
+                    e.target.closest('.batch-actions-menu').style.display = 'none';
+
+                    if (cardIds.length === 0) return;
+
+                    let confirmed = false;
+                    let payload = { cardIds };
+                    let actionText = '';
+
+                    if (action === 'delete') {
+                        const result = await openConfirmModal('Excluir Selecionados', \`Tem certeza de que deseja excluir os \${cardIds.length} leads selecionados?\`, 'Excluir', 'btn-delete-batch');
+                        if (result.confirmed) {
+                            confirmed = true;
+                            payload.updateType = 'etapa';
+                            payload.novaEtapa = 'excluido';
+                        }
+                    } else if (action === 'ia-on' || action === 'ia-off') {
+                        const novoResponsavel = action === 'ia-on' ? 'ia' : 'humano';
+                        actionText = action === 'ia-on' ? 'Ligar IA' : 'Desligar IA';
+                        const result = await openConfirmModal('Alterar Responsável', \`Deseja \${actionText} para os \${cardIds.length} leads selecionados?\`);
+                        if (result.confirmed) {
+                            confirmed = true;
+                            payload.updateType = 'responsavel';
+                            payload.novoResponsavel = novoResponsavel;
+                        }
+                    } else if (action.startsWith('move_')) {
+                        const novaEtapa = action.replace('move_', '');
+                        payload.updateType = 'etapa';
+                        payload.novaEtapa = novaEtapa;
+                        
+                        if (novaEtapa === 'CONTATO FUTURO') {
+                            const dateResult = await openDateModal();
+                            if (dateResult.confirmed) {
+                                payload.dataHoraFuturo = dateResult.date;
+                                const result = await openConfirmModal('Mover Selecionados', \`Mover \${cardIds.length} leads para "\${novaEtapa}" em \${new Date(dateResult.date).toLocaleString('pt-BR')}?\`);
+                                confirmed = result.confirmed;
+                            }
+                        } else {
+                           const result = await openConfirmModal('Mover Selecionados', \`Mover \${cardIds.length} leads para a etapa "\${novaEtapa}"?\`);
+                           confirmed = result.confirmed;
+                        }
+                    }
+
+                    if (confirmed) {
+                        fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(console.error);
+
+                        // Ações na interface
+                        const fromContainer = column.querySelector('.cards-container');
+                        if (action === 'delete') {
+                            selectedCheckboxes.forEach(cb => cb.closest('.kanban-card').remove());
+                            updateCounters(fromContainer, null);
+                        } else if (action.startsWith('ia-')) {
+                            selectedCheckboxes.forEach(cb => {
+                                const toggle = cb.closest('.kanban-card').querySelector('.ia-toggle');
+                                toggle.checked = payload.novoResponsavel === 'ia';
+                            });
+                        } else if (action.startsWith('move_')) {
+                            const toContainer = document.querySelector(\`[data-etapa-id="\${payload.novaEtapa}"]\`);
+                            selectedCheckboxes.forEach(cb => {
+                                toContainer.prepend(cb.closest('.kanban-card'));
+                            });
+                            updateCounters(fromContainer, toContainer);
+                        }
+                    }
+                    
+                    // Limpa a seleção
+                    column.querySelectorAll('.card-checkbox:checked').forEach(cb => cb.checked = false);
+                    column.querySelector('.select-all-in-column').checked = false;
+                    updateBatchActionsVisibility(column);
+                });
             });
         });
     </script>
@@ -374,4 +477,4 @@ let html = `
 // INÍCIO: GERAÇÃO DO ARQUIVO BINÁRIO DE SAÍDA
 // =================================================================
 const buffer = Buffer.from(html, 'utf-8');
-return [{ binary: { data: buffer } }];
+return [{ binary: { data: buffer, fileName: 'kanban_crm.html', mimeType: 'text/html' } }];
